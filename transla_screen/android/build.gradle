@@ -1,3 +1,17 @@
+buildscript {
+    ext.kotlin_version = '1.8.22' // Flutter 3.10.x 通常使用这个版本左右，请根据需要调整
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // 请确保此 Android Gradle Plugin 版本与您的 Gradle 版本兼容
+        // 您可以在 android/gradle/wrapper/gradle-wrapper.properties 中找到 Gradle 版本
+        classpath 'com.android.tools.build:gradle:7.3.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
 allprojects {
     repositories {
         google()
