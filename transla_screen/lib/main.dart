@@ -6,6 +6,7 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'services/native_bridge.dart';
 import 'services/ocr_service.dart'; // Import Local OCR Service
 import 'services/openai_ocr_service.dart'; // Import OpenAI OCR Service
+import 'services/openai_translation_service.dart'; // Import OpenAI Translation Service
 import 'services/settings_service.dart'; // Import Settings Service
 import 'overlay_widget.dart'; // Import the overlay widget
 import 'settings_page.dart'; // Import Settings Page
@@ -90,6 +91,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   OcrEngineType _selectedOcrEngine = OcrEngineType.local; // Default
   bool _isInitializing = true; // Loading settings and services
 
+  // New state variables for Translation
+  OpenAiTranslationService? _translationService;
+  final TextEditingController _targetLanguageController =
+      TextEditingController(text: '中文'); // Default target language
+  String _translatedText = "";
+  bool _isTranslating = false;
+  String _textToTranslate = ""; // To store combined OCR text
+
   @override
   void initState() {
     super.initState();
@@ -111,6 +120,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void dispose() {
     _localOcrService.dispose(); // Dispose Local OCR Service
     _openAiOcrService?.dispose(); // Dispose OpenAI OCR Service if it exists
+    _translationService?.dispose(); // Dispose translation service
+    _targetLanguageController.dispose(); // Dispose language controller
     WidgetsBinding.instance.removeObserver(this);
     // It's good practice to close overlay if app is completely closing, if applicable.
     // FlutterOverlayWindow.closeOverlay();
@@ -169,6 +180,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   Future<void> _loadAndInitializeServices() async {
     setState(() {
       _isInitializing = true;
+      _translatedText = ""; // Reset translated text on reload
+      _textToTranslate = ""; // Reset text to translate
     });
     _selectedOcrEngine = await _settingsService.getSelectedOcrEngine();
     if (_selectedOcrEngine == OcrEngineType.openai) {
@@ -178,21 +191,38 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           openAIConfig['apiKey'] != 'YOUR_OPENAI_API_KEY') {
         _openAiOcrService = OpenAiOcrService(
           apiKey: openAIConfig['apiKey']!,
-          apiEndpoint: openAIConfig['apiEndpoint'],
-          model: openAIConfig['modelName'],
+          apiEndpoint: openAIConfig['apiEndpoint']!,
+          model: openAIConfig['modelName']!,
         );
       } else {
-        // Fallback to local if OpenAI key is not configured properly
         _selectedOcrEngine = OcrEngineType.local;
-        _openAiOcrService = null; // Ensure it's null
+        _openAiOcrService = null;
         print(
-            "OpenAI API key not configured or invalid. Falling back to Local OCR.");
-        // Optionally, show a message to the user to configure API key
+            "OpenAI OCR API key not configured or invalid. Falling back to Local OCR.");
       }
     } else {
-      _openAiOcrService = null; // Ensure it's null if local is selected
+      _openAiOcrService = null;
     }
-    await _checkInitialPermissions(); // Now call this here
+
+    // Initialize Translation Service
+    final translationConfig =
+        await _settingsService.getOpenAiTranslationConfig();
+    if (translationConfig['apiKey'] != null &&
+        translationConfig['apiKey']!.isNotEmpty &&
+        translationConfig['apiKey'] != 'YOUR_OPENAI_API_KEY') {
+      _translationService = OpenAiTranslationService(
+        apiKey: translationConfig['apiKey']!,
+        apiEndpoint: translationConfig['apiEndpoint']!,
+        model: translationConfig['modelName']!,
+      );
+    } else {
+      _translationService = null; // Ensure it's null if not configured
+      print(
+          "OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
+      // We don't force fallback for translation, it just won't be available.
+    }
+
+    await _checkInitialPermissions();
     setState(() {
       _isInitializing = false;
     });
@@ -371,6 +401,49 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _translateOcrResults() async {
+    if (_ocrResults.isEmpty) {
+      setState(() {
+        _translatedText = "没有文本可供翻译。";
+      });
+      return;
+    }
+    if (_translationService == null) {
+      setState(() {
+        _translatedText = "翻译服务未配置或API密钥无效。请检查设置。";
+      });
+      return;
+    }
+
+    setState(() {
+      _isTranslating = true;
+      _translatedText = "正在翻译...";
+      // Combine text from all OCR blocks
+      _textToTranslate = _ocrResults.map((r) => r.text).join("\n");
+    });
+
+    try {
+      final String translationResult = await _translationService!.translate(
+        _textToTranslate,
+        _targetLanguageController.text.trim().isEmpty
+            ? '中文' // Default to Chinese if field is empty
+            : _targetLanguageController.text.trim(),
+      );
+      setState(() {
+        _translatedText = translationResult;
+      });
+    } catch (e) {
+      print("Error during translation call: $e");
+      setState(() {
+        _translatedText = "翻译时发生错误: $e";
+      });
+    } finally {
+      setState(() {
+        _isTranslating = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -480,8 +553,63 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     child: const Text('截图并执行OCR'),
                   ),
                   const SizedBox(height: 20),
+                  if (_ocrResults.isNotEmpty && _translationService != null)
+                    Column(
+                      children: [
+                        const Divider(height: 20, thickness: 1),
+                        const Text('翻译设置和结果',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _targetLanguageController,
+                          decoration: const InputDecoration(
+                            labelText: '目标翻译语言',
+                            border: OutlineInputBorder(),
+                            hintText: '例如: English, 中文, 日本語',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ElevatedButton(
+                          onPressed:
+                              _isTranslating ? null : _translateOcrResults,
+                          child: _isTranslating
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('翻译OCR文本 (OpenAI)'),
+                        ),
+                      ],
+                    ),
+                  if (_isTranslating || _translatedText.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text("翻译结果:",
+                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 5),
+                          Container(
+                            padding: const EdgeInsets.all(8.0),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey),
+                              borderRadius: BorderRadius.circular(4.0),
+                            ),
+                            child: SelectableText(_translatedText,
+                                textAlign: TextAlign.left,
+                                style: const TextStyle(fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 20),
                   const Text(
-                    '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动，可点击穿透 (取决于flag)。\n3. 悬浮窗内可发消息回主应用，主应用也可发消息给悬浮窗。\n4. 点击"截图并执行OCR"获取图像并执行OCR。',
+                    '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动。\n3. 点击"截图并执行OCR"获取图像并执行OCR。\n4. (可选) 在设置中配置OpenAI OCR和/或翻译API密钥。\n5. 如果OCR成功且翻译服务已配置，输入目标语言并点击翻译按钮。',
                     textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),

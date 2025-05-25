@@ -15,6 +15,11 @@ class _SettingsPageState extends State<SettingsPage> {
   final _apiEndpointController = TextEditingController();
   final _modelNameController = TextEditingController();
 
+  // Controllers for OpenAI Translation settings
+  final _translationApiKeyController = TextEditingController();
+  final _translationApiEndpointController = TextEditingController();
+  final _translationModelNameController = TextEditingController();
+
   bool _isLoading = true;
 
   @override
@@ -26,14 +31,25 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     setState(() => _isLoading = true);
     _selectedEngine = await _settingsService.getSelectedOcrEngine();
+    // Load OCR settings
     _apiKeyController.text = await _settingsService.getOpenAiApiKey() ?? '';
     _apiEndpointController.text = await _settingsService.getOpenAiApiEndpoint();
     _modelNameController.text = await _settingsService.getOpenAiModelName();
+
+    // Load Translation settings
+    _translationApiKeyController.text =
+        await _settingsService.getOpenAiTranslationApiKey() ?? '';
+    _translationApiEndpointController.text =
+        await _settingsService.getOpenAiTranslationApiEndpoint();
+    _translationModelNameController.text =
+        await _settingsService.getOpenAiTranslationModelName();
+
     setState(() => _isLoading = false);
   }
 
   Future<void> _saveSettings() async {
     await _settingsService.setSelectedOcrEngine(_selectedEngine);
+    // Save OCR settings
     if (_selectedEngine == OcrEngineType.openai) {
       await _settingsService.setOpenAiApiKey(_apiKeyController.text.trim());
       await _settingsService
@@ -41,6 +57,15 @@ class _SettingsPageState extends State<SettingsPage> {
       await _settingsService
           .setOpenAiModelName(_modelNameController.text.trim());
     }
+
+    // Save Translation settings (always save, as they are independent)
+    await _settingsService
+        .setOpenAiTranslationApiKey(_translationApiKeyController.text.trim());
+    await _settingsService.setOpenAiTranslationApiEndpoint(
+        _translationApiEndpointController.text.trim());
+    await _settingsService.setOpenAiTranslationModelName(
+        _translationModelNameController.text.trim());
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('设置已保存!')),
@@ -53,6 +78,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _apiKeyController.dispose();
     _apiEndpointController.dispose();
     _modelNameController.dispose();
+    // Dispose translation controllers
+    _translationApiKeyController.dispose();
+    _translationApiEndpointController.dispose();
+    _translationModelNameController.dispose();
     super.dispose();
   }
 
@@ -127,6 +156,37 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ],
+                const Divider(height: 40, thickness: 1),
+                const Text('OpenAI 翻译配置',
+                    style:
+                        TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _translationApiKeyController,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI 翻译 API Key',
+                    border: OutlineInputBorder(),
+                    hintText: 'sk-xxxxxxxxxxxx',
+                  ),
+                  obscureText: true,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _translationApiEndpointController,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI 翻译 API Endpoint URL',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _translationModelNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI 翻译 Model Name',
+                    border: OutlineInputBorder(),
+                    hintText: 'gpt-3.5-turbo or gpt-4 etc.',
+                  ),
+                ),
                 const SizedBox(height: 30),
                 ElevatedButton(
                   onPressed: _saveSettings,
