@@ -11,6 +11,7 @@ import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
@@ -45,14 +46,19 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "startScreenCapture" -> {
                     Log.d(TAG, "startScreenCapture method call received.")
+                    if (this.flutterResultForScreenCapture != null) {
+                        Log.w(TAG, "startScreenCapture called while another capture request is already pending. Aborting new request.")
+                        result.error("ALREADY_ACTIVE", "A screen capture request is already in progress.", null)
+                        return@setMethodCallHandler
+                    }
+                    this.flutterResultForScreenCapture = result
                     if (mediaProjectionManager != null) {
-                        this.flutterResultForScreenCapture = result 
-                        ScreenCaptureService.startService(this)
                         startActivityForResult(mediaProjectionManager!!.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE)
                     } else {
                         Log.e(TAG, "MediaProjectionManager is null when trying to start capture intent.")
-                        result.error("UNAVAILABLE", "MediaProjectionManager not available.", null)
-                        ScreenCaptureService.stopService(this)
+                        val res = this.flutterResultForScreenCapture
+                        this.flutterResultForScreenCapture = null
+                        res?.error("UNAVAILABLE", "MediaProjectionManager not available.", null)
                     }
                 }
                 else -> {
@@ -66,52 +72,82 @@ class MainActivity: FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         Log.d(TAG, "onActivityResult: requestCode=$requestCode, resultCode=$resultCode")
+
+        val currentPendingResult = this.flutterResultForScreenCapture
+        if (currentPendingResult == null) {
+            Log.w(TAG, "onActivityResult: flutterResultForScreenCapture is null. This might happen if request timed out or activity was recreated. No action taken.")
+            return
+        }
+
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
-                Log.d(TAG, "Screen capture permission granted.")
-                try {
-                    mediaProjection = mediaProjectionManager?.getMediaProjection(resultCode, data)
-                    if (mediaProjection == null) {
-                        Log.e(TAG, "getMediaProjection returned null.")
-                        flutterResultForScreenCapture?.error("PROJECTION_ERROR", "Failed to get MediaProjection.", null)
-                        cleanUpScreenCapture(false)
-                        return
-                    }
-                    Log.d(TAG, "MediaProjection obtained successfully.")
-                    mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                        override fun onStop() {
-                            super.onStop()
-                            Log.w(TAG, "MediaProjection.Callback onStop() called - projection stopped unexpectedly.")
-                            if (flutterResultForScreenCapture != null) {
-                                flutterResultForScreenCapture?.error("PROJECTION_STOPPED", "MediaProjection stopped unexpectedly.", null)
-                            }
-                            cleanUpScreenCapture(true)
+                Log.d(TAG, "Screen capture permission granted by user.")
+                ScreenCaptureService.startService(this)
+                val finalResultCode = resultCode
+                val finalData = data
+                
+                handler.postDelayed({
+                    Log.d(TAG, "Attempting to get MediaProjection after service start and delay.")
+                    try {
+                        if (this.flutterResultForScreenCapture == null || this.flutterResultForScreenCapture != currentPendingResult) {
+                            Log.w(TAG, "flutterResultForScreenCapture changed or nulled before getMediaProjection. Aborting.")
+                            ScreenCaptureService.stopService(this@MainActivity)
+                            return@postDelayed
                         }
-                    }, handler)
-                    captureScreenshotAndReply()
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "SecurityException in onActivityResult: ${e.message}", e)
-                    flutterResultForScreenCapture?.error("SECURITY_EXCEPTION", "SecurityException: ${e.message}. Ensure foreground service is running correctly.", null)
-                    cleanUpScreenCapture(true)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Generic Exception in onActivityResult: ${e.message}", e)
-                    flutterResultForScreenCapture?.error("EXCEPTION_ON_RESULT", "Exception in onActivityResult: ${e.message}", null)
-                    cleanUpScreenCapture(true)
-                }
+                        mediaProjection = mediaProjectionManager?.getMediaProjection(finalResultCode, finalData)
+                        if (mediaProjection == null) {
+                            Log.e(TAG, "getMediaProjection returned null even after service start.")
+                            val result = this.flutterResultForScreenCapture
+                            this.flutterResultForScreenCapture = null
+                            result?.error("PROJECTION_ERROR", "Failed to get MediaProjection post-service-start.", null)
+                            cleanUpScreenCaptureResources(true)
+                            return@postDelayed
+                        }
+                        Log.d(TAG, "MediaProjection obtained successfully after service start.")
+                        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                            override fun onStop() {
+                                super.onStop()
+                                Log.w(TAG, "MediaProjection.Callback onStop() called.")
+                                val result = flutterResultForScreenCapture
+                                flutterResultForScreenCapture = null
+                                result?.error("PROJECTION_STOPPED", "MediaProjection stopped unexpectedly.", null)
+                                cleanUpScreenCaptureResources(true) 
+                            }
+                        }, handler)
+                        captureScreenshotAndReply()
+                    } catch (e: SecurityException) {
+                        Log.e(TAG, "SecurityException when getting MediaProjection: ${e.message}", e)
+                        val result = this.flutterResultForScreenCapture
+                        this.flutterResultForScreenCapture = null
+                        result?.error("SECURITY_EXCEPTION_POST_SERVICE", "SecurityException: ${e.message}", null)
+                        cleanUpScreenCaptureResources(true) 
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Generic Exception when getting MediaProjection: ${e.message}", e)
+                        val result = this.flutterResultForScreenCapture
+                        this.flutterResultForScreenCapture = null
+                        result?.error("EXCEPTION_POST_SERVICE", "Exception: ${e.message}", null)
+                        cleanUpScreenCaptureResources(true) 
+                    }
+                }, 300)
+
             } else {
                 Log.w(TAG, "Screen capture permission denied by user or cancelled. Result code: $resultCode")
-                flutterResultForScreenCapture?.error("USER_DENIED", "Screen capture permission denied by user.", null)
-                cleanUpScreenCapture(true)
+                val result = this.flutterResultForScreenCapture
+                this.flutterResultForScreenCapture = null
+                result?.error("USER_DENIED", "Screen capture permission denied by user.", null)
             }
         }
     }
 
     private fun captureScreenshotAndReply() {
-        val currentResult = flutterResultForScreenCapture 
-        if (mediaProjection == null || currentResult == null) {
-            Log.e(TAG, "captureScreenshotAndReply: MediaProjection or Result callback is null.")
-            currentResult?.error("INTERNAL_ERROR", "MediaProjection or Result callback is null before capture.", null)
-            cleanUpScreenCapture(false)
+        val activeResultForThisAttempt = this.flutterResultForScreenCapture
+        if (mediaProjection == null || activeResultForThisAttempt == null) {
+            Log.e(TAG, "captureScreenshotAndReply: MediaProjection or an active Result callback is null at start.")
+            if (activeResultForThisAttempt != null) {
+                 this.flutterResultForScreenCapture = null
+                 activeResultForThisAttempt.error("INTERNAL_ERROR_PRE_CAPTURE", "MediaProjection is null or result already handled.", null)
+            }
+            cleanUpScreenCaptureResources(true) 
             return
         }
         Log.d(TAG, "Starting actual screenshot capture logic.")
@@ -126,22 +162,33 @@ class MainActivity: FlutterActivity() {
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
         Log.d(TAG, "ImageReader created with size: $screenWidth x $screenHeight")
 
+        val localImageReader = imageReader 
+
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenCapture",
             screenWidth, screenHeight, screenDensity,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface, null, handler
+            localImageReader?.surface, null, handler
         )
+
         if (virtualDisplay == null) {
              Log.e(TAG, "Failed to create VirtualDisplay.")
-             currentResult.error("VIRTUAL_DISPLAY_FAIL", "Failed to create VirtualDisplay.", null)
-             cleanUpScreenCapture(false)
+             this.flutterResultForScreenCapture = null 
+             activeResultForThisAttempt.error("VIRTUAL_DISPLAY_FAIL", "Failed to create VirtualDisplay.", null)
+             cleanUpScreenCaptureResources(true)
              return
         }
         Log.d(TAG, "VirtualDisplay created.")
 
-        imageReader?.setOnImageAvailableListener({ reader ->
-            Log.d(TAG, "ImageAvailableListener: New image is available.")
+        localImageReader?.setOnImageAvailableListener({ reader ->
+            val resultForThisCallback = this.flutterResultForScreenCapture
+            if (resultForThisCallback == null) {
+                Log.w(TAG, "ImageAvailableListener: flutterResultForScreenCapture is null, reply already sent or error occurred. Ignoring.")
+                return@setOnImageAvailableListener
+            }
+            this.flutterResultForScreenCapture = null
+
+            Log.d(TAG, "ImageAvailableListener: New image is available. Processing...")
             var image: Image? = null
             var bitmap: Bitmap? = null
             try {
@@ -169,29 +216,32 @@ class MainActivity: FlutterActivity() {
                     val byteArray = byteArrayOutputStream.toByteArray()
                     Log.d(TAG, "Bitmap compressed to PNG byte array, size: ${byteArray.size}")
                     
-                    currentResult.success(byteArray)
-                    cleanUpScreenCapture(false)
+                    resultForThisCallback.success(byteArray)
+                    cleanUpScreenCaptureResources(false)
 
                 } else {
-                    Log.w(TAG, "Acquired image is null.")
-                    currentResult.error("IMAGE_NULL", "Acquired image is null.", null)
-                    cleanUpScreenCapture(true)
+                    Log.w(TAG, "Acquired image is null in listener.")
+                    resultForThisCallback.error("IMAGE_NULL_LISTENER", "Acquired image is null in listener.", null)
+                    cleanUpScreenCaptureResources(true)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Exception during screen capture processing: ${e.message}", e)
-                currentResult.error("CAPTURE_EXCEPTION", "Exception during screen capture: ${e.message}", null)
-                cleanUpScreenCapture(true)
+                Log.e(TAG, "Exception during screen capture processing in listener: ${e.message}", e)
+                resultForThisCallback.error("CAPTURE_EXCEPTION_LISTENER", "Exception in listener: ${e.message}", null)
+                cleanUpScreenCaptureResources(true)
             } finally {
                 image?.close()
                 bitmap?.recycle() 
-                Log.d(TAG, "ImageAvailableListener: Cleanup done.")
+                Log.d(TAG, "ImageAvailableListener: Processing and cleanup for this image done.")
             }
         }, handler)
     }
 
-    private fun cleanUpScreenCapture(stopService: Boolean) {
-        Log.d(TAG, "cleanUpScreenCapture called. Stop service: $stopService")
+    private fun cleanUpScreenCaptureResources(stopService: Boolean) {
+        Log.d(TAG, "cleanUpScreenCaptureResources called. Stop service: $stopService")
         try {
+            if (imageReader != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                 // imageReader?.setOnImageAvailableListener(null, null) // This can be problematic
+            }
             virtualDisplay?.release()
             virtualDisplay = null
             imageReader?.close()
@@ -204,7 +254,11 @@ class MainActivity: FlutterActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Exception during media projection resource cleanup: ${e.message}", e)
         }
-        flutterResultForScreenCapture = null
+        if (this.flutterResultForScreenCapture != null) {
+            Log.w(TAG, "flutterResultForScreenCapture was not null during final cleanup. This might indicate an unhandled path.")
+            this.flutterResultForScreenCapture = null
+        }
+
         if (stopService) {
             ScreenCaptureService.stopService(this)
         }
@@ -213,6 +267,6 @@ class MainActivity: FlutterActivity() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called.")
-        cleanUpScreenCapture(true) 
+        cleanUpScreenCaptureResources(true) 
     }
 }
