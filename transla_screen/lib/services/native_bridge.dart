@@ -1,8 +1,9 @@
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 
 class NativeBridge {
   static const MethodChannel _channel =
-      MethodChannel('com.example.transla_screen/screen_capture');
+      MethodChannel('com.translascreen/native_bridge');
 
   // requestSystemAlertWindowPermission and canDrawOverlays are now handled by flutter_overlay_window plugin
   // static Future<bool> requestSystemAlertWindowPermission() async { ... }

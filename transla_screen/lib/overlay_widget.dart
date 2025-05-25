@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 class SimpleOverlayWidget extends StatefulWidget {
-  const SimpleOverlayWidget({super.key});
+  const SimpleOverlayWidget({Key? key}) : super(key: key);
 
   @override
   State<SimpleOverlayWidget> createState() => _SimpleOverlayWidgetState();
