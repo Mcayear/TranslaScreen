@@ -5,28 +5,34 @@ import 'package:http/http.dart' as http;
 import 'package:transla_screen/services/ocr_service.dart'; // For OcrResult
 import 'dart:ui' as ui; // For ui.Rect for OcrResult
 
-// IMPORTANT: Replace with your actual OpenAI API Key
-const String _openAiApiKey = 'YOUR_OPENAI_API_KEY';
-const String _openAiApiEndpoint = 'https://api.openai.com/v1/chat/completions';
-// It's better to use the latest vision-supporting model, e.g., gpt-4o or gpt-4-turbo if gpt-4-vision-preview is deprecated
-const String _openAiModel = 'gpt-4-vision-preview';
+// Default values if not configured - API key MUST be provided.
+const String _defaultOpenAiApiEndpoint =
+    'https://api.openai.com/v1/chat/completions';
+const String _defaultOpenAiModel =
+    'gpt-4-vision-preview'; // Or 'gpt-4o', 'gpt-4-turbo'
 
 class OpenAiOcrService {
   final http.Client _httpClient;
+  final String apiKey;
+  final String apiEndpoint;
+  final String model;
 
-  OpenAiOcrService({http.Client? client})
-      : _httpClient = client ?? http.Client();
+  OpenAiOcrService({
+    required this.apiKey,
+    String? apiEndpoint,
+    String? model,
+    http.Client? client,
+  })  : _httpClient = client ?? http.Client(),
+        this.apiEndpoint = apiEndpoint ?? _defaultOpenAiApiEndpoint,
+        this.model = model ?? _defaultOpenAiModel;
 
   Future<List<OcrResult>> processImageBytes(
       Uint8List pngImageBytes, int imageWidth, int imageHeight) async {
-    if (_openAiApiKey == 'YOUR_OPENAI_API_KEY') {
-      print(
-          'OpenAI API Key is not set. Please configure it in openai_ocr_service.dart');
-      // Optionally, throw an exception or return a specific error result
-      // For now, returning an empty list to avoid breaking the flow during development
+    if (apiKey.isEmpty || apiKey == 'YOUR_OPENAI_API_KEY') {
+      print('OpenAI API Key is not set or is invalid. Please configure it.');
       return [
         OcrResult(
-            text: "OpenAI API Key not configured.",
+            text: "OpenAI API Key not configured or invalid.",
             boundingBox: ui.Rect.zero,
             cornerPoints: [])
       ];
@@ -35,10 +41,10 @@ class OpenAiOcrService {
     final String base64Image = base64Encode(pngImageBytes);
 
     final String prompt =
-        "Analyze this image and return all detected text along with their bounding box coordinates in the format: [{ \"text\": \"...\", \"bbox\": [x1, y1, x2, y2] }, ...]. The bounding box coordinates should be absolute pixel values based on the image dimensions (width: $imageWidth, height: $imageHeight). If no text is found, return an empty list [].";
+        "Analyze this image and return all detected text along with their bounding box coordinates in the format: [{ \"text\": \"...\", \"bbox\": [x1, y1, x2, y2] }, ...]. The bounding box coordinates should be absolute pixel values based on the image dimensions (width: $imageWidth, height: $imageHeight). If no text is found, return an empty list []. Ensure the output is a valid JSON array.";
 
     final Map<String, dynamic> requestBody = {
-      'model': _openAiModel,
+      'model': this.model,
       'messages': [
         {
           'role': 'user',
@@ -51,15 +57,24 @@ class OpenAiOcrService {
           ]
         }
       ],
-      'max_tokens': 1500, // Adjust as needed, depends on expected text volume
+      'max_tokens': 2000, // Increased slightly
+      // Add response_format for gpt-4-turbo and later models to enforce JSON output
+      // 'response_format': { 'type': 'json_object' }, // Uncomment if model supports it
     };
+
+    // If using a model that supports JSON mode (like gpt-4-1106-preview or gpt-4o when 'json_object' is specified)
+    // the prompt needs to explicitly instruct the model to produce JSON.
+    // The current prompt already does this, but it's good to be aware.
+    // if (this.model.contains("1106") || this.model.contains("gpt-4o")) { // Example check
+    //   requestBody['response_format'] = {'type': 'json_object'};
+    // }
 
     try {
       final response = await _httpClient.post(
-        Uri.parse(_openAiApiEndpoint),
+        Uri.parse(this.apiEndpoint),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $_openAiApiKey',
+          'Authorization': 'Bearer ${this.apiKey}',
         },
         body: jsonEncode(requestBody),
       );
@@ -68,7 +83,6 @@ class OpenAiOcrService {
         final Map<String, dynamic> responseBody =
             jsonDecode(utf8.decode(response.bodyBytes));
 
-        // Debug: Print the raw response from OpenAI
         print("OpenAI Raw Response: ${response.body}");
 
         if (responseBody['choices'] != null &&
@@ -77,10 +91,7 @@ class OpenAiOcrService {
             responseBody['choices'][0]['message']['content'] != null) {
           String content = responseBody['choices'][0]['message']['content'];
 
-          // The response content might be a JSON string, or a string containing JSON.
-          // We need to robustly parse this.
-          // First, check if the content *is* the JSON list itself.
-          // It might be wrapped in backticks if markdown was used.
+          // Handle potential markdown code block for JSON
           if (content.startsWith("```json")) {
             content = content.substring(7);
             if (content.endsWith("```")) {
@@ -95,6 +106,8 @@ class OpenAiOcrService {
           content = content.trim();
 
           try {
+            // If response_format: {'type': 'json_object'} was used and supported,
+            // 'content' should directly be a parsable JSON string.
             final List<dynamic> resultsJson = jsonDecode(content);
             final List<OcrResult> ocrResults = [];
             for (var item in resultsJson) {
@@ -104,20 +117,15 @@ class OpenAiOcrService {
                   item['bbox'] is List &&
                   item['bbox'].length == 4) {
                 final List<dynamic> bboxRaw = item['bbox'];
-                // Ensure coordinates are num (int or double) and convert
                 final double x1 = (bboxRaw[0] as num).toDouble();
                 final double y1 = (bboxRaw[1] as num).toDouble();
                 final double x2 = (bboxRaw[2] as num).toDouble();
                 final double y2 = (bboxRaw[3] as num).toDouble();
 
-                // Create OcrResult. Note: OpenAI might not provide corner points in the same way ML Kit does.
-                // We'll use the bbox to create a Rect and leave cornerPoints empty or derive if necessary.
-                // For simplicity, let's assume bbox is [left, top, right, bottom]
                 ocrResults.add(OcrResult(
                   text: item['text'] as String,
                   boundingBox: ui.Rect.fromLTRB(x1, y1, x2, y2),
                   cornerPoints: [
-                    // Derived from bbox for consistency with OcrResult
                     Point(x1.toInt(), y1.toInt()),
                     Point(x2.toInt(), y1.toInt()),
                     Point(x2.toInt(), y2.toInt()),
@@ -129,11 +137,13 @@ class OpenAiOcrService {
             return ocrResults;
           } catch (e) {
             print('Error parsing OpenAI OCR results JSON: $e');
-            print('Problematic content: $content');
-            // Return a result indicating parsing failure
+            print(
+                'Problematic content direct from API: ${responseBody['choices'][0]['message']['content']}');
+            print('Processed content for parsing: $content');
             return [
               OcrResult(
-                  text: "Error parsing OpenAI response: $e",
+                  text:
+                      "Error parsing OpenAI response JSON: $e. Check logs for raw content.",
                   boundingBox: ui.Rect.zero,
                   cornerPoints: [])
             ];
@@ -143,8 +153,7 @@ class OpenAiOcrService {
           print('Response body: ${response.body}');
           return [
             OcrResult(
-                text:
-                    "OpenAI response structure error. Full response: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}...",
+                text: "OpenAI response structure error. Full response in logs.",
                 boundingBox: ui.Rect.zero,
                 cornerPoints: [])
           ];
@@ -153,8 +162,7 @@ class OpenAiOcrService {
         print('OpenAI API Error: ${response.statusCode} - ${response.body}');
         return [
           OcrResult(
-              text:
-                  "OpenAI API Error ${response.statusCode}: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}...",
+              text: "OpenAI API Error ${response.statusCode}. Details in logs.",
               boundingBox: ui.Rect.zero,
               cornerPoints: [])
         ];
