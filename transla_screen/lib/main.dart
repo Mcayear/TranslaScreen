@@ -245,7 +245,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _statusMessage.contains('悬浮窗已显示') ||
         _statusMessage.contains('无法显示悬浮窗') ||
         _statusMessage.contains('已发送数据'))) {
-      _statusMessage = permStatus + "\n" + overlayStatus + captureMsg;
+      _statusMessage = "$permStatus\n$overlayStatus$captureMsg";
     }
 
     if (mounted) {
