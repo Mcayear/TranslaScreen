@@ -4,8 +4,11 @@ import 'dart:ui' as ui; // For ui.Image and ui.Size for OCR service
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'services/native_bridge.dart';
-import 'services/ocr_service.dart'; // Import OCR Service
+import 'services/ocr_service.dart'; // Import Local OCR Service
+import 'services/openai_ocr_service.dart'; // Import OpenAI OCR Service
+import 'services/settings_service.dart'; // Import Settings Service
 import 'overlay_widget.dart'; // Import the overlay widget
+import 'settings_page.dart'; // Import Settings Page
 
 // Overlay Entry Point
 @pragma("vm:entry-point")
@@ -80,14 +83,21 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   String _dataFromOverlay = "";
   List<OcrResult> _ocrResults = []; // To store OCR results
 
-  late LocalOcrService _ocrService; // Declare OCR service instance
+  late LocalOcrService _localOcrService; // Declare Local OCR service instance
+  OpenAiOcrService?
+      _openAiOcrService; // Declare OpenAI OCR service instance (nullable)
+  late SettingsService _settingsService; // Declare SettingsService instance
+  OcrEngineType _selectedOcrEngine = OcrEngineType.local; // Default
+  bool _isInitializing = true; // Loading settings and services
 
   @override
   void initState() {
     super.initState();
-    _ocrService = LocalOcrService(); // Initialize OCR Service
+    _settingsService = SettingsService(); // Initialize SettingsService
+    _localOcrService =
+        LocalOcrService(); // Initialize Local OCR Service (always available as fallback or default)
+    _loadAndInitializeServices(); // New method to load settings and init appropriate OCR service
     WidgetsBinding.instance.addObserver(this);
-    _checkInitialPermissions();
     // Listen for data from overlay
     FlutterOverlayWindow.overlayListener.listen((data) {
       log("Data from overlay: $data");
@@ -99,7 +109,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    _ocrService.dispose(); // Dispose OCR Service
+    _localOcrService.dispose(); // Dispose Local OCR Service
+    _openAiOcrService?.dispose(); // Dispose OpenAI OCR Service if it exists
     WidgetsBinding.instance.removeObserver(this);
     // It's good practice to close overlay if app is completely closing, if applicable.
     // FlutterOverlayWindow.closeOverlay();
@@ -155,6 +166,38 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> _loadAndInitializeServices() async {
+    setState(() {
+      _isInitializing = true;
+    });
+    _selectedOcrEngine = await _settingsService.getSelectedOcrEngine();
+    if (_selectedOcrEngine == OcrEngineType.openai) {
+      final openAIConfig = await _settingsService.getOpenAiConfig();
+      if (openAIConfig['apiKey'] != null &&
+          openAIConfig['apiKey']!.isNotEmpty &&
+          openAIConfig['apiKey'] != 'YOUR_OPENAI_API_KEY') {
+        _openAiOcrService = OpenAiOcrService(
+          apiKey: openAIConfig['apiKey']!,
+          apiEndpoint: openAIConfig['apiEndpoint'],
+          model: openAIConfig['modelName'],
+        );
+      } else {
+        // Fallback to local if OpenAI key is not configured properly
+        _selectedOcrEngine = OcrEngineType.local;
+        _openAiOcrService = null; // Ensure it's null
+        print(
+            "OpenAI API key not configured or invalid. Falling back to Local OCR.");
+        // Optionally, show a message to the user to configure API key
+      }
+    } else {
+      _openAiOcrService = null; // Ensure it's null if local is selected
+    }
+    await _checkInitialPermissions(); // Now call this here
+    setState(() {
+      _isInitializing = false;
+    });
+  }
+
   Future<void> _toggleScreenCaptureAndOcr() async {
     setState(() {
       _capturedImageBytes = null;
@@ -168,7 +211,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (!overlayPermGranted) {
       setState(() {
         _statusMessage = '进行OCR前，请先授予悬浮窗权限（后续用于显示结果）。';
-        _screenCaptureProcessed = true;
+        _screenCaptureProcessed =
+            true; // Still mark as processed to update UI state
       });
       return;
     }
@@ -182,26 +226,50 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (imageBytes != null) {
       setState(() {
         _capturedImageBytes = imageBytes;
-        _statusMessage = '截图成功！正在进行OCR识别...';
+        _statusMessage =
+            '截图成功！正在进行OCR识别 (${_selectedOcrEngine == OcrEngineType.openai ? "OpenAI" : "本地"})...';
       });
 
-      // Get image dimensions for OCR service (important)
-      // This is a common way to get dimensions from image bytes in Flutter
       final codec = await ui.instantiateImageCodec(imageBytes);
       final frame = await codec.getNextFrame();
-      final ui.Size imageSize =
-          ui.Size(frame.image.width.toDouble(), frame.image.height.toDouble());
-      frame.image.dispose(); // Dispose the ui.Image from frame
+      final int imageWidth = frame.image.width;
+      final int imageHeight = frame.image.height;
+      frame.image.dispose();
 
-      final List<OcrResult> results =
-          await _ocrService.processImageBytes(imageBytes);
+      List<OcrResult> results = [];
+      try {
+        if (_selectedOcrEngine == OcrEngineType.openai &&
+            _openAiOcrService != null) {
+          if (_openAiOcrService!.apiKey.isEmpty ||
+              _openAiOcrService!.apiKey == 'YOUR_OPENAI_API_KEY') {
+            _statusMessage = 'OpenAI API Key 未配置。请在设置中配置。转用本地OCR。';
+            results = await _localOcrService.processImageBytes(imageBytes);
+          } else {
+            results = await _openAiOcrService!
+                .processImageBytes(imageBytes, imageWidth, imageHeight);
+          }
+        } else {
+          results = await _localOcrService.processImageBytes(imageBytes);
+        }
+      } catch (e) {
+        print("Error during OCR processing: $e");
+        _statusMessage = "OCR 处理出错: $e";
+      }
+
       setState(() {
         _ocrResults = results;
         _screenCaptureProcessed = true;
-        if (results.isNotEmpty) {
-          _statusMessage = 'OCR完成！识别到 ${results.length} 个文本块。';
+        if (results.isNotEmpty &&
+            !(results.length == 1 &&
+                results.first.text.contains("API Key not configured"))) {
+          _statusMessage =
+              'OCR完成 (${_selectedOcrEngine == OcrEngineType.openai ? "OpenAI" : "本地"})！识别到 ${results.length} 个文本块。';
+        } else if (results.isNotEmpty &&
+            results.first.text.contains("API Key not configured")) {
+          // Status already set above for this specific case
         } else {
-          _statusMessage = 'OCR完成，但未识别到文本。';
+          _statusMessage =
+              'OCR完成 (${_selectedOcrEngine == OcrEngineType.openai ? "OpenAI" : "本地"})，但未识别到文本。';
         }
       });
     } else {
@@ -211,7 +279,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _statusMessage = '屏幕捕获失败或未返回图像数据。';
       });
     }
-    _updateStatusMessage();
+    _updateStatusMessage(); // This might override specific messages set above, review if needed
   }
 
   Future<void> _toggleOverlay() async {
@@ -314,93 +382,112 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         // Here we take the value from the MyHomePage object that was created by
         // the App.build method, and use it to set our appbar title.
         title: const Text('TranslaScreen - 控制面板'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
+              );
+              // Reload settings and re-initialize services when returning from settings page
+              _loadAndInitializeServices();
+            },
+            tooltip: '设置',
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text(
-              _statusMessage, // This will display the latest status
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16),
-            ),
-            if (_dataFromOverlay.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Text(
-                  "来自悬浮窗的数据: $_dataFromOverlay",
-                  textAlign: TextAlign.center,
-                  style:
-                      const TextStyle(fontSize: 14, color: Colors.blueAccent),
-                ),
-              ),
-            const SizedBox(height: 10),
-            if (_capturedImageBytes != null)
-              Column(
-                children: [
-                  SizedBox(
-                    height: 150, // Constrain image height
-                    child: InteractiveViewer(
-                        child: Image.memory(_capturedImageBytes!,
-                            fit: BoxFit.contain)),
+      body: _isInitializing
+          ? const Center(
+              child: CircularProgressIndicator(semanticsLabel: "正在加载设置..."))
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                // Column is also a layout widget. It takes a list of children and
+                // arranges them vertically. By default, it sizes itself to fit its
+                // children horizontally, and tries to be as tall as its parent.
+                //
+                // Column has various properties to control how it sizes itself and
+                // how it positions its children. Here we use mainAxisAlignment to
+                // center the children vertically; the main axis here is the vertical
+                // axis because Columns are vertical (the cross axis would be
+                // horizontal).
+                //
+                // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
+                // action in the IDE, or press "p" in the console), to see the
+                // wireframe for each widget.
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    _statusMessage, // This will display the latest status
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 16),
                   ),
-                  if (_ocrResults.isNotEmpty)
+                  if (_dataFromOverlay.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text("OCR识别文本 (首条): '${_ocrResults.first.text}'",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.deepPurpleAccent)),
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Text(
+                        "来自悬浮窗的数据: $_dataFromOverlay",
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 14, color: Colors.blueAccent),
+                      ),
                     ),
+                  const SizedBox(height: 10),
+                  if (_capturedImageBytes != null)
+                    Column(
+                      children: [
+                        SizedBox(
+                          height: 150, // Constrain image height
+                          child: InteractiveViewer(
+                              child: Image.memory(_capturedImageBytes!,
+                                  fit: BoxFit.contain)),
+                        ),
+                        if (_ocrResults.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                                "OCR识别文本 (首条): '${_ocrResults.first.text}'",
+                                textAlign: TextAlign.center,
+                                style:
+                                    TextStyle(color: Colors.deepPurpleAccent)),
+                          ),
+                      ],
+                    ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: _requestOverlayPermission,
+                    child: const Text('检查/请求悬浮窗权限 (插件)'),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: _toggleOverlay,
+                    child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
+                  ),
+                  if (_isOverlayVisible)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 10.0),
+                      child: ElevatedButton(
+                        onPressed: _sendDataToOverlay,
+                        child: const Text('发送OCR摘要到悬浮窗'), // Updated button text
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed:
+                        _toggleScreenCaptureAndOcr, // Changed to new combined function
+                    child: const Text('截图并执行OCR'),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动，可点击穿透 (取决于flag)。\n3. 悬浮窗内可发消息回主应用，主应用也可发消息给悬浮窗。\n4. 点击"截图并执行OCR"获取图像并执行OCR。',
+                    textAlign: TextAlign.left,
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
                 ],
               ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _requestOverlayPermission,
-              child: const Text('检查/请求悬浮窗权限 (插件)'),
             ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: _toggleOverlay,
-              child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
-            ),
-            if (_isOverlayVisible)
-              Padding(
-                padding: const EdgeInsets.only(top: 10.0),
-                child: ElevatedButton(
-                  onPressed: _sendDataToOverlay,
-                  child: const Text('发送OCR摘要到悬浮窗'), // Updated button text
-                ),
-              ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed:
-                  _toggleScreenCaptureAndOcr, // Changed to new combined function
-              child: const Text('截图并执行OCR'),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动，可点击穿透 (取决于flag)。\n3. 悬浮窗内可发消息回主应用，主应用也可发消息给悬浮窗。\n4. 点击"截图并执行OCR"获取图像并执行OCR。',
-              textAlign: TextAlign.left,
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
