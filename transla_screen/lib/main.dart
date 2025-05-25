@@ -1,6 +1,21 @@
-import 'dart:typed_data'; // Ensure Uint8List is imported
+import 'dart:developer'; // For log
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'services/native_bridge.dart'; // 导入 NativeBridge
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'services/native_bridge.dart';
+import 'overlay_widget.dart'; // Import the overlay widget
+
+// Overlay Entry Point
+@pragma("vm:entry-point")
+void overlayMain() {
+  // runApp an instance of your overlay widget here
+  runApp(
+    const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SimpleOverlayWidget(), // Use the widget we created
+    ),
+  );
+}
 
 void main() {
   runApp(const MyApp());
@@ -55,84 +70,91 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
-  // Add WidgetsBindingObserver
-  bool _canDrawOverlays = false;
-  bool _screenCaptureProcessed =
-      false; // Tracks if capture process was initiated and completed/failed
+  // bool _canDrawOverlays = false; // Now handled by flutter_overlay_window
+  bool _isOverlayVisible = false;
+  bool _screenCaptureProcessed = false;
   String _statusMessage = "";
-  Uint8List? _capturedImageBytes; // To store the captured image
+  Uint8List? _capturedImageBytes;
+  String _dataFromOverlay = "";
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // Register observer
+    WidgetsBinding.instance.addObserver(this);
     _checkInitialPermissions();
+    // Listen for data from overlay
+    FlutterOverlayWindow.overlayListener.listen((data) {
+      log("Data from overlay: $data");
+      setState(() {
+        _dataFromOverlay = data.toString();
+      });
+    });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // Unregister observer
+    WidgetsBinding.instance.removeObserver(this);
+    // It's good practice to close overlay if app is completely closing, if applicable.
+    // FlutterOverlayWindow.closeOverlay();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // 当应用从后台恢复时 (例如从系统设置页返回后)
-    // 重新检查悬浮窗权限
     if (state == AppLifecycleState.resumed) {
-      _checkOverlayPermission();
+      _checkOverlayPermissionStatus();
     }
   }
 
   Future<void> _checkInitialPermissions() async {
-    await _checkOverlayPermission();
-    // 屏幕捕获状态通常在用户操作后才改变，初始为 false
+    await _checkOverlayPermissionStatus();
     setState(() {
       _screenCaptureProcessed = false;
       _capturedImageBytes = null;
     });
   }
 
-  Future<void> _checkOverlayPermission() async {
-    final bool granted = await NativeBridge.canDrawOverlays();
+  Future<void> _checkOverlayPermissionStatus() async {
+    final bool granted = await FlutterOverlayWindow.isPermissionGranted();
     setState(() {
-      _canDrawOverlays = granted;
+      // _canDrawOverlays = granted; // No longer need this state variable directly for UI logic if using plugin's request
       _updateStatusMessage();
+      if (!granted) {
+        _statusMessage = "悬浮窗权限未授予。请通过按钮请求权限。";
+      }
     });
   }
 
   Future<void> _requestOverlayPermission() async {
     setState(() {
       _statusMessage = '正在请求悬浮窗权限...';
-      _capturedImageBytes = null; // Clear previous image if any
+      _capturedImageBytes = null;
     });
-    // 即使原生端在 startActivityForResult 后立即返回 false，
-    // 我们也应该提示用户去设置。用户返回后，didChangeAppLifecycleState 会触发检查。
-    await NativeBridge.requestSystemAlertWindowPermission();
-    // 提示用户检查设置，因为我们无法直接得到结果
-    // 真正的状态更新会在 app resumed 时通过 _checkOverlayPermission 完成
+    final bool? granted = await FlutterOverlayWindow.requestPermission();
     setState(() {
-      _statusMessage = '如果权限未授予，请在系统设置中开启本应用的"显示在其他应用的上层"权限。';
+      if (granted == true) {
+        _statusMessage = '悬浮窗权限已授予。';
+      } else {
+        _statusMessage = '悬浮窗权限请求被拒绝或失败。';
+      }
+      _updateStatusMessage();
     });
-    // 短暂延迟后再次检查，以防用户快速操作
-    await Future.delayed(const Duration(seconds: 1));
-    await _checkOverlayPermission();
   }
 
   Future<void> _toggleScreenCapture() async {
-    // Reset previous capture attempt state
     setState(() {
       _capturedImageBytes = null;
       _screenCaptureProcessed = false;
       _statusMessage = '正在准备开始屏幕捕获...';
     });
 
-    if (!_canDrawOverlays) {
+    final bool overlayPermGranted =
+        await FlutterOverlayWindow.isPermissionGranted();
+    if (!overlayPermGranted) {
       setState(() {
         _statusMessage = '请先授予悬浮窗权限，才能开始屏幕捕获。';
-        _screenCaptureProcessed =
-            true; // Mark as processed (failed due to permission)
+        _screenCaptureProcessed = true;
       });
       return;
     }
@@ -145,53 +167,94 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
 
     setState(() {
       _capturedImageBytes = imageBytes;
-      _screenCaptureProcessed = true; // Mark as processed
+      _screenCaptureProcessed = true;
       if (imageBytes != null) {
         _statusMessage = '屏幕截图已成功捕获！';
       } else {
         _statusMessage = '屏幕捕获失败或未返回图像数据。';
       }
-      _updateStatusMessage(); // Update the general status part
+      _updateStatusMessage();
+    });
+  }
+
+  Future<void> _toggleOverlay() async {
+    if (_isOverlayVisible) {
+      await FlutterOverlayWindow.closeOverlay();
+      setState(() {
+        _isOverlayVisible = false;
+        _statusMessage = "悬浮窗已关闭。";
+      });
+    } else {
+      final bool permGranted = await FlutterOverlayWindow.isPermissionGranted();
+      if (!permGranted) {
+        setState(() {
+          _statusMessage = "无法显示悬浮窗：权限未授予。请先请求权限。";
+        });
+        await _requestOverlayPermission(); // Attempt to request if not granted
+        // Recheck after request attempt
+        if (!await FlutterOverlayWindow.isPermissionGranted()) return;
+      }
+      // Show overlay
+      await FlutterOverlayWindow.showOverlay(
+        // entryPoint: overlayMain, // Not needed if only one @pragma("vm:entry-point") void overlayMain() exists
+        height: 300, // Example height
+        width: 250, // Example width
+        alignment: OverlayAlignment.center,
+        flag: OverlayFlag.clickThrough, // Example: allow click-through
+        overlayTitle: "TranslaScreen 悬浮窗",
+        overlayContent: "悬浮窗正在运行",
+        enableDrag: true,
+      );
+      setState(() {
+        _isOverlayVisible = true;
+        _statusMessage = "悬浮窗已显示。";
+      });
+    }
+    _updateStatusMessage();
+  }
+
+  Future<void> _sendDataToOverlay() async {
+    if (!_isOverlayVisible) {
+      setState(() {
+        _statusMessage = "悬浮窗未激活，无法发送数据。";
+      });
+      return;
+    }
+    final dataToSend = "来自主应用的消息: ${DateTime.now().second}";
+    await FlutterOverlayWindow.shareData(dataToSend);
+    setState(() {
+      _statusMessage = "已发送数据到悬浮窗: $dataToSend";
     });
   }
 
   void _updateStatusMessage() {
-    String permStatus = "悬浮窗权限: ${_canDrawOverlays ? '已授予' : '未授予'}";
-    String captureStatus = "";
-
+    String permStatus =
+        "悬浮窗权限: ${(_isOverlayVisible || FlutterOverlayWindow.isPermissionGranted() == true) ? '已授予' : '未授予'}"; // Simplified check
+    String overlayStatus = "悬浮窗状态: ${_isOverlayVisible ? '可见' : '已关闭'}";
+    String captureMsg = "";
     if (_screenCaptureProcessed) {
-      captureStatus =
-          _capturedImageBytes != null ? "截图状态: 成功捕获" : "截图状态: 失败或无数据";
+      captureMsg = _capturedImageBytes != null ? "\n截图: 成功捕获" : "\n截图: 失败或无数据";
     }
 
-    // Keep the specific message from _toggleScreenCapture if image is just captured or failed
-    // Otherwise, show a general status.
-    if (_statusMessage.startsWith('正在') ||
+    // Prioritize specific messages set by actions
+    if (!(_statusMessage.startsWith('正在') ||
         _statusMessage.startsWith('如果') ||
         _statusMessage.contains('截图已成功捕获') ||
-        _statusMessage.contains('失败或未返回图像数据')) {
-      // Use the more specific status message already set.
-    } else {
-      _statusMessage = permStatus + "\n" + captureStatus;
+        _statusMessage.contains('失败或未返回图像数据') ||
+        _statusMessage.contains('悬浮窗已关闭') ||
+        _statusMessage.contains('悬浮窗已显示') ||
+        _statusMessage.contains('无法显示悬浮窗') ||
+        _statusMessage.contains('已发送数据'))) {
+      _statusMessage = permStatus + "\n" + overlayStatus + captureMsg;
     }
 
-    // This ensures the UI updates if _statusMessage was changed by other methods.
-    // If only called from other setState blocks, this direct setState here might be redundant
-    // but helps if _updateStatusMessage is called from somewhere else without its own setState.
     if (mounted) {
-      setState(() {}); // Re-render with the potentially updated _statusMessage
+      setState(() {});
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Call _updateStatusMessage directly here if you want it to execute before every build.
-    // However, it's better to update the message only when state actually changes.
-    // The current setup updates it in initState and after permission checks/toggles.
-    // If you need it to be absolutely fresh on every build, uncomment the next line
-    // and consider removing some setState calls within _updateStatusMessage or make it smarter.
-    // _updateStatusMessage();
-
     return Scaffold(
       appBar: AppBar(
         // TRY THIS: Try changing the color here to a specific color (to
@@ -202,73 +265,78 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         // the App.build method, and use it to set our appbar title.
         title: const Text('TranslaScreen - 控制面板'),
       ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            // Column is also a layout widget. It takes a list of children and
-            // arranges them vertically. By default, it sizes itself to fit its
-            // children horizontally, and tries to be as tall as its parent.
-            //
-            // Column has various properties to control how it sizes itself and
-            // how it positions its children. Here we use mainAxisAlignment to
-            // center the children vertically; the main axis here is the vertical
-            // axis because Columns are vertical (the cross axis would be
-            // horizontal).
-            //
-            // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-            // action in the IDE, or press "p" in the console), to see the
-            // wireframe for each widget.
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(
-                _statusMessage, // This will display the latest status
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 10),
-              if (_capturedImageBytes != null)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10.0),
-                    child: InteractiveViewer(
-                        child: Image.memory(_capturedImageBytes!,
-                            fit: BoxFit.contain)),
-                  ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          // Column is also a layout widget. It takes a list of children and
+          // arranges them vertically. By default, it sizes itself to fit its
+          // children horizontally, and tries to be as tall as its parent.
+          //
+          // Column has various properties to control how it sizes itself and
+          // how it positions its children. Here we use mainAxisAlignment to
+          // center the children vertically; the main axis here is the vertical
+          // axis because Columns are vertical (the cross axis would be
+          // horizontal).
+          //
+          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
+          // action in the IDE, or press "p" in the console), to see the
+          // wireframe for each widget.
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              _statusMessage, // This will display the latest status
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
+            if (_dataFromOverlay.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Text(
+                  "来自悬浮窗的数据: $_dataFromOverlay",
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(fontSize: 14, color: Colors.blueAccent),
                 ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!_canDrawOverlays) {
-                    await _requestOverlayPermission();
-                  } else {
-                    // 如果已经有权限，可以提示用户，或者什么都不做
-                    setState(() {
-                      _statusMessage = '悬浮窗权限已经授予。';
-                      _capturedImageBytes =
-                          null; // Clear image when re-checking permission
-                    });
-                    await _checkOverlayPermission(); // 再次确认
-                  }
-                },
-                child: Text(_canDrawOverlays ? '悬浮窗权限已授予' : '检查/请求悬浮窗权限'),
               ),
-              const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: _toggleScreenCapture,
-                child: const Text('捕获一次屏幕截图'), // Changed button text
+            const SizedBox(height: 10),
+            if (_capturedImageBytes != null)
+              SizedBox(
+                height: 200, // Constrain image height for layout
+                child: InteractiveViewer(
+                    child: Image.memory(_capturedImageBytes!,
+                        fit: BoxFit.contain)),
               ),
-              const SizedBox(height: 20),
-              const Text(
-                '使用说明:\n1. 点击"检查/请求悬浮窗权限"。如果未授予，将跳转到系统设置。请手动开启权限后返回本应用。\n2. 权限授予后，按钮文字会更新。\n3. 点击"捕获一次屏幕截图"以获取当前屏幕内容图像。',
-                textAlign: TextAlign.left,
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _requestOverlayPermission,
+              child: const Text('检查/请求悬浮窗权限 (插件)'),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: _toggleOverlay,
+              child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
+            ),
+            if (_isOverlayVisible)
+              Padding(
+                padding: const EdgeInsets.only(top: 10.0),
+                child: ElevatedButton(
+                  onPressed: _sendDataToOverlay,
+                  child: const Text('发送数据到悬浮窗'),
+                ),
               ),
-            ],
-          ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: _toggleScreenCapture,
+              child: const Text('捕获一次屏幕截图'),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动，可点击穿透 (取决于flag)。\n3. 悬浮窗内可发消息回主应用，主应用也可发消息给悬浮窗。\n4. 点击"捕获一次屏幕截图"获取图像。',
+              textAlign: TextAlign.left,
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
         ),
       ),
     );

@@ -11,11 +11,8 @@ import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import androidx.annotation.NonNull
@@ -26,7 +23,6 @@ import java.io.ByteArrayOutputStream
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.translascreen/native_bridge"
-    private val REQUEST_CODE_SYSTEM_ALERT_WINDOW = 1001
     private val REQUEST_CODE_SCREEN_CAPTURE = 1002
 
     private var mediaProjectionManager: MediaProjectionManager? = null
@@ -44,23 +40,6 @@ class MainActivity: FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler {
             call, result ->
             when (call.method) {
-                "requestSystemAlertWindowPermission" -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                Uri.parse("package:$packageName"))
-                        startActivityForResult(intent, REQUEST_CODE_SYSTEM_ALERT_WINDOW)
-                        result.success(false) 
-                    } else {
-                        result.success(true)
-                    }
-                }
-                "canDrawOverlays" -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        result.success(Settings.canDrawOverlays(this))
-                    } else {
-                        result.success(true)
-                    }
-                }
                 "startScreenCapture" -> {
                     if (mediaProjectionManager != null) {
                         this.flutterResultForScreenCapture = result 
@@ -78,9 +57,7 @@ class MainActivity: FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_CODE_SYSTEM_ALERT_WINDOW) {
-            // No direct result here. Dart side should re-check using canDrawOverlays()
-        } else if (requestCode == REQUEST_CODE_SCREEN_CAPTURE) {
+        if (requestCode == REQUEST_CODE_SCREEN_CAPTURE) {
             if (resultCode == Activity.RESULT_OK && data != null) {
                 mediaProjection = mediaProjectionManager?.getMediaProjection(resultCode, data)
                 if (mediaProjection == null) {
