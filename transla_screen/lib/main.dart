@@ -8,17 +8,17 @@ import 'services/ocr_service.dart'; // Import Local OCR Service
 import 'services/openai_ocr_service.dart'; // Import OpenAI OCR Service
 import 'services/openai_translation_service.dart'; // Import OpenAI Translation Service
 import 'services/settings_service.dart'; // Import Settings Service
-import 'overlay_widget.dart'; // Import the overlay widget
+import 'overlay_widget.dart'; // Import the overlay widget with InteractiveOverlayUI
 import 'settings_page.dart'; // Import Settings Page
+import 'dart:convert';
 
 // Overlay Entry Point
 @pragma("vm:entry-point")
 void overlayMain() {
-  // runApp an instance of your overlay widget here
   runApp(
     const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: SimpleOverlayWidget(), // Use the widget we created
+      home: InteractiveOverlayUI(), // 使用新创建的交互式悬浮窗 UI
     ),
   );
 }
@@ -110,9 +110,19 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     // Listen for data from overlay
     FlutterOverlayWindow.overlayListener.listen((data) {
       log("Data from overlay: $data");
-      setState(() {
-        _dataFromOverlay = data.toString();
-      });
+      try {
+        if (data is String && data.startsWith('{')) {
+          final Map<String, dynamic> jsonData = jsonDecode(data);
+          if (jsonData['type'] == 'command') {
+            _handleOverlayCommand(jsonData['action']);
+          }
+        }
+        setState(() {
+          _dataFromOverlay = data.toString();
+        });
+      } catch (e) {
+        log("Error parsing overlay data: $e");
+      }
     });
   }
 
@@ -228,7 +238,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _toggleScreenCaptureAndOcr() async {
+  Future<void> _toggleScreenCaptureAndOcr({bool sendToOverlay = false}) async {
     setState(() {
       _capturedImageBytes = null;
       _screenCaptureProcessed = false;
@@ -241,8 +251,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     if (!overlayPermGranted) {
       setState(() {
         _statusMessage = '进行OCR前，请先授予悬浮窗权限（后续用于显示结果）。';
-        _screenCaptureProcessed =
-            true; // Still mark as processed to update UI state
+        _screenCaptureProcessed = true;
       });
       return;
     }
@@ -284,6 +293,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       } catch (e) {
         print("Error during OCR processing: $e");
         _statusMessage = "OCR 处理出错: $e";
+        setState(() {
+          _screenCaptureProcessed = true;
+        });
+        return;
       }
 
       setState(() {
@@ -302,6 +315,14 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               'OCR完成 (${_selectedOcrEngine == OcrEngineType.openai ? "OpenAI" : "本地"})，但未识别到文本。';
         }
       });
+
+      // 如果需要发送到悬浮窗并且有OCR结果，直接处理翻译和发送
+      if (sendToOverlay && results.isNotEmpty && _translationService != null) {
+        setState(() {
+          _statusMessage = '正在准备翻译并发送到悬浮窗...';
+        });
+        await _sendDataToOverlay(); // 此方法现在已增强，会处理翻译和发送到悬浮窗
+      }
     } else {
       setState(() {
         _capturedImageBytes = null;
@@ -309,7 +330,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _statusMessage = '屏幕捕获失败或未返回图像数据。';
       });
     }
-    _updateStatusMessage(); // This might override specific messages set above, review if needed
+    _updateStatusMessage();
   }
 
   Future<void> _toggleOverlay() async {
@@ -329,16 +350,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         // Recheck after request attempt
         if (!await FlutterOverlayWindow.isPermissionGranted()) return;
       }
-      // Show overlay
+
+      // 获取屏幕尺寸，用于全屏悬浮窗
+      final MediaQueryData mediaQuery =
+          MediaQueryData.fromView(WidgetsBinding.instance.window);
+      final double screenWidth = mediaQuery.size.width;
+      final double screenHeight = mediaQuery.size.height;
+
+      // Show overlay with full screen size
       await FlutterOverlayWindow.showOverlay(
         // entryPoint: overlayMain, // Not needed if only one @pragma("vm:entry-point") void overlayMain() exists
-        height: 300, // Example height
-        width: 250, // Example width
-        alignment: OverlayAlignment.center,
-        flag: OverlayFlag.clickThrough, // Example: allow click-through
+        height: screenHeight.toInt(), // 使用全屏高度
+        width: screenWidth.toInt(), // 使用全屏宽度
+        alignment: OverlayAlignment.topLeft, // 从左上角开始填满屏幕
+        flag: OverlayFlag.defaultFlag, // 允许交互
         overlayTitle: "TranslaScreen 悬浮窗",
         overlayContent: "悬浮窗正在运行",
-        enableDrag: true,
+        enableDrag: true, // 保持 FAB 可拖动
       );
       setState(() {
         _isOverlayVisible = true;
@@ -355,16 +383,82 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       });
       return;
     }
-    // Example: send OCR results count or first result to overlay
-    String dataToSend = "来自主应用的消息: ${DateTime.now().second}";
+
+    // 如果有 OCR 结果，尝试翻译并发送遮罩数据
     if (_ocrResults.isNotEmpty) {
-      dataToSend =
-          "OCR发现: ${_ocrResults.first.text.substring(0, (_ocrResults.first.text.length > 20 ? 20 : _ocrResults.first.text.length))}...";
+      setState(() {
+        _statusMessage = "正在准备翻译结果并发送到悬浮窗...";
+      });
+
+      // 如果配置了翻译服务，执行翻译
+      if (_translationService != null) {
+        try {
+          // 构建要翻译的文本列表
+          final List<String> textsToTranslate =
+              _ocrResults.map((result) => result.text).toList();
+          final List<Map<String, dynamic>> maskItems = [];
+
+          // 对每个 OCR 块分别翻译
+          for (int i = 0; i < _ocrResults.length; i++) {
+            final OcrResult ocrResult = _ocrResults[i];
+            final String text = textsToTranslate[i];
+
+            // 翻译文本
+            final String translatedText = await _translationService!.translate(
+              text,
+              _targetLanguageController.text.trim().isEmpty
+                  ? '中文' // 默认翻译为中文
+                  : _targetLanguageController.text.trim(),
+            );
+
+            // 转换 OcrResult.boundingBox 为悬浮窗期望的格式
+            final maskItem = {
+              'bbox': {
+                'l': ocrResult.boundingBox.left,
+                't': ocrResult.boundingBox.top,
+                'w': ocrResult.boundingBox.width,
+                'h': ocrResult.boundingBox.height,
+              },
+              'translatedText': translatedText,
+              'originalText': text, // 原始文本，可用于调试或后续功能
+            };
+
+            maskItems.add(maskItem);
+          }
+
+          // 将翻译遮罩数据发送到悬浮窗
+          final data = {
+            'type': 'display_translation_mask',
+            'items': maskItems,
+          };
+
+          await FlutterOverlayWindow.shareData(jsonEncode(data));
+          setState(() {
+            _statusMessage = "已将翻译结果发送到悬浮窗显示。";
+          });
+        } catch (e) {
+          log("翻译或发送数据时出错: $e");
+          setState(() {
+            _statusMessage = "翻译出错: $e";
+          });
+        }
+      } else {
+        // 无翻译服务时，发送普通摘要数据
+        String dataToSend =
+            "OCR发现: ${_ocrResults.first.text.substring(0, (_ocrResults.first.text.length > 20 ? 20 : _ocrResults.first.text.length))}...";
+        await FlutterOverlayWindow.shareData(dataToSend);
+        setState(() {
+          _statusMessage = "已发送 OCR 摘要到悬浮窗 (无翻译服务): $dataToSend";
+        });
+      }
+    } else {
+      // 无 OCR 结果时，发送普通消息
+      String dataToSend = "来自主应用的消息: ${DateTime.now().second}";
+      await FlutterOverlayWindow.shareData(dataToSend);
+      setState(() {
+        _statusMessage = "已发送消息到悬浮窗: $dataToSend";
+      });
     }
-    await FlutterOverlayWindow.shareData(dataToSend);
-    setState(() {
-      _statusMessage = "已发送数据到悬浮窗: $dataToSend";
-    });
   }
 
   void _updateStatusMessage() {
@@ -444,16 +538,53 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
+  // 处理来自悬浮窗的命令
+  void _handleOverlayCommand(String? action) {
+    if (action == null) return;
+
+    switch (action) {
+      case 'start_fullscreen_translation':
+        log("收到全屏翻译命令");
+        _startFullscreenTranslation();
+        break;
+      case 'start_area_selection':
+        log("收到选区翻译命令");
+        _startAreaSelection();
+        break;
+      case 'reset_overlay_ui':
+        log("收到重置悬浮窗命令");
+        // 可以在这里执行任何需要的清理操作
+        break;
+      default:
+        log("未知的悬浮窗命令: $action");
+    }
+  }
+
+  // 开始全屏翻译流程
+  Future<void> _startFullscreenTranslation() async {
+    // 使用现有的截图和 OCR 逻辑，但将结果发送到悬浮窗而非显示在主应用中
+    await _toggleScreenCaptureAndOcr(sendToOverlay: true);
+  }
+
+  // 开始选区翻译流程
+  Future<void> _startAreaSelection() async {
+    // 暂时使用全屏翻译流程代替，后续实现区域选择功能
+    log("选区翻译功能尚未实现，暂时使用全屏翻译代替");
+    await _startFullscreenTranslation();
+
+    // 选区翻译的完整实现应该包括：
+    // 1. 在悬浮窗中显示区域选择 UI
+    // 2. 用户选择区域后获取该区域坐标
+    // 3. 仅对该区域进行截图
+    // 4. 对截图进行 OCR 和翻译
+    // 5. 将结果发送到悬浮窗显示为遮罩
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: const Text('TranslaScreen - 控制面板'),
         actions: [
           IconButton(
@@ -463,8 +594,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                 context,
                 MaterialPageRoute(builder: (context) => const SettingsPage()),
               );
-              // Reload settings and re-initialize services when returning from settings page
-              _loadAndInitializeServices();
+              // 设置页面返回后，重新加载服务配置
+              await _loadAndInitializeServices();
             },
             tooltip: '设置',
           ),
@@ -523,8 +654,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                             child: Text(
                                 "OCR识别文本 (首条): '${_ocrResults.first.text}'",
                                 textAlign: TextAlign.center,
-                                style:
-                                    const TextStyle(color: Colors.deepPurpleAccent)),
+                                style: const TextStyle(
+                                    color: Colors.deepPurpleAccent)),
                           ),
                       ],
                     ),
@@ -538,14 +669,6 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     onPressed: _toggleOverlay,
                     child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
                   ),
-                  if (_isOverlayVisible)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10.0),
-                      child: ElevatedButton(
-                        onPressed: _sendDataToOverlay,
-                        child: const Text('发送OCR摘要到悬浮窗'), // Updated button text
-                      ),
-                    ),
                   const SizedBox(height: 10),
                   ElevatedButton(
                     onPressed:
@@ -553,63 +676,32 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     child: const Text('截图并执行OCR'),
                   ),
                   const SizedBox(height: 20),
-                  if (_ocrResults.isNotEmpty && _translationService != null)
-                    Column(
-                      children: [
-                        const Divider(height: 20, thickness: 1),
-                        const Text('翻译设置和结果',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: _targetLanguageController,
-                          decoration: const InputDecoration(
-                            labelText: '目标翻译语言',
-                            border: OutlineInputBorder(),
-                            hintText: '例如: English, 中文, 日本語',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed:
-                              _isTranslating ? null : _translateOcrResults,
-                          child: _isTranslating
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('翻译OCR文本 (OpenAI)'),
-                        ),
-                      ],
-                    ),
-                  if (_isTranslating || _translatedText.isNotEmpty)
+
+                  // 保留翻译设置，但简化UI
+                  if (_translationService != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 10.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text("翻译结果:",
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 5),
-                          Container(
-                            padding: const EdgeInsets.all(8.0),
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey),
-                              borderRadius: BorderRadius.circular(4.0),
-                            ),
-                            child: SelectableText(_translatedText,
-                                textAlign: TextAlign.left,
-                                style: const TextStyle(fontSize: 14)),
-                          ),
-                        ],
+                      padding: const EdgeInsets.symmetric(vertical: 10.0),
+                      child: TextField(
+                        controller: _targetLanguageController,
+                        decoration: const InputDecoration(
+                          labelText: '设置翻译目标语言 (默认: 中文)',
+                          border: OutlineInputBorder(),
+                          hintText: '例如: English, 中文, 日本語',
+                        ),
                       ),
                     ),
+
                   const SizedBox(height: 20),
                   const Text(
-                    '使用说明:\n1. 点击"检查/请求悬浮窗权限 (插件)"。\n2. 点击"显示悬浮窗"以激活。可拖动。\n3. 点击"截图并执行OCR"获取图像并执行OCR。\n4. (可选) 在设置中配置OpenAI OCR和/或翻译API密钥。\n5. 如果OCR成功且翻译服务已配置，输入目标语言并点击翻译按钮。',
+                    '使用说明:\n'
+                    '1. 点击"检查/请求悬浮窗权限 (插件)"。\n'
+                    '2. 点击"显示悬浮窗"激活翻译悬浮球 (可拖动)。\n'
+                    '3. 单击悬浮球展开功能菜单：\n'
+                    '   - 绿色图标: 全屏翻译\n'
+                    '   - 蓝色图标: 选区翻译 (暂未完全实现)\n'
+                    '4. 长按悬浮球直接触发全屏翻译。\n'
+                    '5. 翻译完成后在屏幕上显示翻译遮罩，再次点击悬浮球关闭遮罩。\n'
+                    '\n注意: OCR 结果的质量取决于屏幕内容的清晰度和文本布局。',
                     textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
