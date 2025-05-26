@@ -393,7 +393,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _statusMessage.contains('悬浮窗已显示') ||
         _statusMessage.contains('无法显示悬浮窗') ||
         _statusMessage.contains('已发送数据'))) {
-      _statusMessage = permStatus + "\n" + overlayStatus + captureMsg + ocrMsg;
+      _statusMessage = "$permStatus\n$overlayStatus$captureMsg$ocrMsg";
     }
 
     if (mounted) {
@@ -524,7 +524,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                                 "OCR识别文本 (首条): '${_ocrResults.first.text}'",
                                 textAlign: TextAlign.center,
                                 style:
-                                    TextStyle(color: Colors.deepPurpleAccent)),
+                                    const TextStyle(color: Colors.deepPurpleAccent)),
                           ),
                       ],
                     ),

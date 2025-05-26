@@ -23,8 +23,8 @@ class OpenAiOcrService {
     String? model,
     http.Client? client,
   })  : _httpClient = client ?? http.Client(),
-        this.apiEndpoint = apiEndpoint ?? _defaultOpenAiApiEndpoint,
-        this.model = model ?? _defaultOpenAiModel;
+        apiEndpoint = apiEndpoint ?? _defaultOpenAiApiEndpoint,
+        model = model ?? _defaultOpenAiModel;
 
   Future<List<OcrResult>> processImageBytes(
       Uint8List pngImageBytes, int imageWidth, int imageHeight) async {
@@ -44,7 +44,7 @@ class OpenAiOcrService {
         "Analyze this image and return all detected text along with their bounding box coordinates in the format: [{ \"text\": \"...\", \"bbox\": [x1, y1, x2, y2] }, ...]. The bounding box coordinates should be absolute pixel values based on the image dimensions (width: $imageWidth, height: $imageHeight). If no text is found, return an empty list []. Ensure the output is a valid JSON array.";
 
     final Map<String, dynamic> requestBody = {
-      'model': this.model,
+      'model': model,
       'messages': [
         {
           'role': 'user',
@@ -71,10 +71,10 @@ class OpenAiOcrService {
 
     try {
       final response = await _httpClient.post(
-        Uri.parse(this.apiEndpoint),
+        Uri.parse(apiEndpoint),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${this.apiKey}',
+          'Authorization': 'Bearer $apiKey',
         },
         body: jsonEncode(requestBody),
       );
