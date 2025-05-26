@@ -129,8 +129,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
           setState(() {
             _isMenuOpen = !_isMenuOpen;
             if (_isMenuOpen) {
+              FlutterOverlayWindow.resizeOverlay(56, 56*3, true);
               _menuAnimationController.forward();
             } else {
+              FlutterOverlayWindow.resizeOverlay(56, 56, true);
               _menuAnimationController.reverse();
             }
           });
@@ -180,7 +182,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               animation: _menuAnimationController,
               builder: (context, child) {
                 return Transform.translate(
-                  offset: Offset(0, -80 * _menuAnimationController.value),
+                  offset: Offset(0, 60 * _menuAnimationController.value),
                   child: child,
                 );
               },
@@ -191,10 +193,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                     'action': 'start_fullscreen_translation'
                   }));
                   // 点击后关闭菜单
-                  setState(() {
-                    _isMenuOpen = false;
-                    _menuAnimationController.reverse();
-                  });
+                  // setState(() {
+                  //   _isMenuOpen = false;
+                  //   _menuAnimationController.reverse();
+                  // });
                 },
                 child: Container(
                   width: 48,
@@ -220,7 +222,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               animation: _menuAnimationController,
               builder: (context, child) {
                 return Transform.translate(
-                  offset: Offset(0, -140 * _menuAnimationController.value),
+                  offset: Offset(0, 60 * _menuAnimationController.value),
                   child: child,
                 );
               },
@@ -305,24 +307,12 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
     return Material(
       color: Colors.transparent,
       child: Stack(
+        alignment: Alignment.topCenter,
         children: [
-          // 翻译遮罩层 - 放在底部以便FAB可以覆盖在上面
-          _buildTranslationMask(),
-
-          // FAB和菜单 - 默认放在右下角
-          Positioned(
-            bottom: 80,
-            right: 20,
-            child: Stack(
-              alignment: Alignment.bottomCenter,
-              children: [
-                // 展开的菜单
-                _buildExpandedMenu(),
-                // FAB
-                _buildFab(),
-              ],
-            ),
-          ),
+          // 展开的菜单
+          _buildExpandedMenu(),
+          // FAB
+          _buildFab(),
         ],
       ),
     );

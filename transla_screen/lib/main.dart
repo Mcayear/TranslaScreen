@@ -15,9 +15,10 @@ import 'dart:convert';
 // Overlay Entry Point
 @pragma("vm:entry-point")
 void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(
     const MaterialApp(
-      debugShowCheckedModeBanner: false,
+      debugShowCheckedModeBanner: true,
       home: InteractiveOverlayUI(), // 使用新创建的交互式悬浮窗 UI
     ),
   );
@@ -36,21 +37,6 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'TranslaScreen',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
@@ -61,15 +47,6 @@ class MyApp extends StatelessWidget {
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -117,7 +94,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
             _handleOverlayCommand(jsonData['action']);
           }
         }
-        setState(() {
+    setState(() {
           _dataFromOverlay = data.toString();
         });
       } catch (e) {
@@ -333,7 +310,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     _updateStatusMessage();
   }
 
-  Future<void> _toggleOverlay() async {
+  Future<void> _toggleOverlay(BuildContext context) async {
     if (_isOverlayVisible) {
       await FlutterOverlayWindow.closeOverlay();
       setState(() {
@@ -351,22 +328,23 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         if (!await FlutterOverlayWindow.isPermissionGranted()) return;
       }
 
-      // 获取屏幕尺寸，用于全屏悬浮窗
-      final MediaQueryData mediaQuery =
-          MediaQueryData.fromView(WidgetsBinding.instance.window);
-      final double screenWidth = mediaQuery.size.width;
-      final double screenHeight = mediaQuery.size.height;
+      // // 获取屏幕尺寸，用于全屏悬浮窗
+      // final MediaQueryData mediaQuery =
+      //     MediaQueryData.fromView(View.of(context));
+      // final double screenWidth = mediaQuery.size.width;
+      // final double screenHeight = mediaQuery.size.height;
 
       // Show overlay with full screen size
       await FlutterOverlayWindow.showOverlay(
-        // entryPoint: overlayMain, // Not needed if only one @pragma("vm:entry-point") void overlayMain() exists
-        height: screenHeight.toInt(), // 使用全屏高度
-        width: screenWidth.toInt(), // 使用全屏宽度
-        alignment: OverlayAlignment.topLeft, // 从左上角开始填满屏幕
-        flag: OverlayFlag.defaultFlag, // 允许交互
+        enableDrag: true, // 保持 FAB 可拖动
         overlayTitle: "TranslaScreen 悬浮窗",
         overlayContent: "悬浮窗正在运行",
-        enableDrag: true, // 保持 FAB 可拖动
+        flag: OverlayFlag.defaultFlag, // 允许交互
+        visibility: NotificationVisibility.visibilityPublic,
+        // positionGravity: PositionGravity.auto,
+        height: 56*4,
+        width: 56*4,
+        startPosition: const OverlayPosition(0, -259),
       );
       setState(() {
         _isOverlayVisible = true;
@@ -606,23 +584,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               child: CircularProgressIndicator(semanticsLabel: "正在加载设置..."))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
-              child: Column(
-                // Column is also a layout widget. It takes a list of children and
-                // arranges them vertically. By default, it sizes itself to fit its
-                // children horizontally, and tries to be as tall as its parent.
-                //
-                // Column has various properties to control how it sizes itself and
-                // how it positions its children. Here we use mainAxisAlignment to
-                // center the children vertically; the main axis here is the vertical
-                // axis because Columns are vertical (the cross axis would be
-                // horizontal).
-                //
-                // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-                // action in the IDE, or press "p" in the console), to see the
-                // wireframe for each widget.
-                mainAxisAlignment: MainAxisAlignment.center,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
+          children: <Widget>[
                   Text(
                     _statusMessage, // This will display the latest status
                     textAlign: TextAlign.center,
@@ -666,7 +631,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(
-                    onPressed: _toggleOverlay,
+                    onPressed: () {_toggleOverlay(context);},
                     child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
                   ),
                   const SizedBox(height: 10),
@@ -692,7 +657,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     ),
 
                   const SizedBox(height: 20),
-                  const Text(
+            const Text(
                     '使用说明:\n'
                     '1. 点击"检查/请求悬浮窗权限 (插件)"。\n'
                     '2. 点击"显示悬浮窗"激活翻译悬浮球 (可拖动)。\n'
@@ -704,10 +669,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     '\n注意: OCR 结果的质量取决于屏幕内容的清晰度和文本布局。',
                     textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ],
-              ),
             ),
+          ],
+        ),
+      ),
     );
   }
 }
