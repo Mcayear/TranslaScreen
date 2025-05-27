@@ -57,52 +57,83 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
       vsync: this,
     );
 
+    print(
+        '[OverlayWidget] Initializing and listening to FlutterOverlayWindow.overlayListener.');
     // 监听来自主应用的消息
     FlutterOverlayWindow.overlayListener.listen((event) {
+      print('[OverlayWidget] Raw event received by overlayListener: $event');
       _handleMessage(event);
     });
   }
 
   // 处理来自主应用的消息
   void _handleMessage(dynamic message) {
-    if (message == null) return;
+    if (message == null) {
+      print('[OverlayWidget] _handleMessage received null message.');
+      return;
+    }
 
     try {
-      final data = message is String ? jsonDecode(message) : message;
+      final Map<String, dynamic> data;
+      if (message is String) {
+        try {
+          data = jsonDecode(message) as Map<String, dynamic>;
+        } catch (e) {
+          print(
+              '[OverlayWidget] Failed to decode JSON message: $message, error: $e');
+          return;
+        }
+      } else if (message is Map<String, dynamic>) {
+        data = message;
+      } else {
+        print(
+            '[OverlayWidget] Received message of unexpected type: ${message.runtimeType}, message: $message');
+        return;
+      }
 
-      if (data is! Map<String, dynamic>) return;
-
-      final String? type = data['type'];
+      final String? type = data['type'] as String?;
+      print(
+          '[OverlayWidget] _handleMessage processing: type=$type, data=$data');
 
       if (type == 'display_translation_mask') {
-        final List<dynamic>? items = data['items'];
+        final List<dynamic>? items = data['items'] as List<dynamic>?;
         if (items != null) {
           setState(() {
             _maskItems = items
-                .map((item) => TranslationMaskItem.fromJson(item))
+                .map((item) =>
+                    TranslationMaskItem.fromJson(item as Map<String, dynamic>))
                 .toList();
             _showTranslationMask = true;
-            // 关闭展开的菜单（如果打开）
             if (_isMenuOpen) {
               _isMenuOpen = false;
               _menuAnimationController.reverse();
+              FlutterOverlayWindow.resizeOverlay(56, 56, true);
             }
           });
+          print('[OverlayWidget] Handled "display_translation_mask".');
+        } else {
+          print(
+              '[OverlayWidget] "display_translation_mask" received null or invalid items.');
         }
       } else if (type == 'reset_overlay_ui') {
         setState(() {
           _showTranslationMask = false;
           _maskItems.clear();
-
-          // 如果菜单是展开的，收起它
           if (_isMenuOpen) {
             _isMenuOpen = false;
             _menuAnimationController.reverse();
+            FlutterOverlayWindow.resizeOverlay(56, 56, true);
           }
         });
+        print('[OverlayWidget] Handled "reset_overlay_ui".');
+      } else {
+        print(
+            '[OverlayWidget] Received unhandled message type: "$type". This message might be intended for the main application.');
       }
-    } catch (e) {
-      print('Error handling message in overlay: $e');
+    } catch (e, s) {
+      print('[OverlayWidget] Error in _handleMessage: $e');
+      print('[OverlayWidget] Stacktrace: $s');
+      print('[OverlayWidget] Original message causing error: $message');
     }
   }
 
@@ -116,20 +147,25 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
   Widget _buildFab() {
     return GestureDetector(
       onTap: () {
+        print("FAB tapped");
         // 如果当前显示翻译遮罩，则关闭遮罩
         if (_showTranslationMask) {
-          FlutterOverlayWindow.shareData(
-              jsonEncode({'type': 'command', 'action': 'reset_overlay_ui'}));
+          final command =
+              jsonEncode({'type': 'command', 'action': 'reset_overlay_ui'});
+          print(
+              "[OverlayWidget] FAB tap (close mask): Sending command to main app: $command");
+          FlutterOverlayWindow.shareData(command);
           setState(() {
             _showTranslationMask = false;
             _maskItems.clear();
+            // 注意：这里 FAB 的颜色会变，但大小不会变，因为菜单未涉及
           });
         } else {
           // 否则，切换菜单展开/折叠状态
           setState(() {
             _isMenuOpen = !_isMenuOpen;
             if (_isMenuOpen) {
-              FlutterOverlayWindow.resizeOverlay(56, 56*3, true);
+              FlutterOverlayWindow.resizeOverlay(56, 56 * 3, true);
               _menuAnimationController.forward();
             } else {
               FlutterOverlayWindow.resizeOverlay(56, 56, true);
@@ -140,8 +176,11 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
       },
       onLongPress: () {
         // 长按触发全屏翻译
-        FlutterOverlayWindow.shareData(jsonEncode(
-            {'type': 'command', 'action': 'start_fullscreen_translation'}));
+        final command = jsonEncode(
+            {'type': 'command', 'action': 'start_fullscreen_translation'});
+        print(
+            "[OverlayWidget] FAB Long press: Sending command to main app: $command");
+        FlutterOverlayWindow.shareData(command);
       },
       child: Container(
         width: 56,
@@ -188,10 +227,13 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               },
               child: GestureDetector(
                 onTap: () {
-                  FlutterOverlayWindow.shareData(jsonEncode({
+                  final command = jsonEncode({
                     'type': 'command',
                     'action': 'start_fullscreen_translation'
-                  }));
+                  });
+                  print(
+                      "[OverlayWidget] Fullscreen button tapped: Sending command to main app: $command");
+                  FlutterOverlayWindow.shareData(command);
                   // 点击后关闭菜单
                   // setState(() {
                   //   _isMenuOpen = false;
@@ -228,12 +270,16 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               },
               child: GestureDetector(
                 onTap: () {
-                  FlutterOverlayWindow.shareData(jsonEncode(
-                      {'type': 'command', 'action': 'start_area_selection'}));
+                  final command = jsonEncode(
+                      {'type': 'command', 'action': 'start_area_selection'});
+                  print(
+                      "[OverlayWidget] Area selection button tapped: Sending command to main app: $command");
+                  FlutterOverlayWindow.shareData(command);
                   // 点击后关闭菜单
                   setState(() {
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
+                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
                   });
                 },
                 child: Container(

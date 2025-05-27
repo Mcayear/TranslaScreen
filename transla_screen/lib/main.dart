@@ -84,23 +84,37 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         LocalOcrService(); // Initialize Local OCR Service (always available as fallback or default)
     _loadAndInitializeServices(); // New method to load settings and init appropriate OCR service
     WidgetsBinding.instance.addObserver(this);
+    _setupOverlayListener();
+  }
+
+  void _setupOverlayListener() {
     // Listen for data from overlay
+    log("Setting up overlay listener...");
     FlutterOverlayWindow.overlayListener.listen((data) {
-      log("Data from overlay: $data");
+      log("Data received from overlay: $data");
       try {
         if (data is String && data.startsWith('{')) {
           final Map<String, dynamic> jsonData = jsonDecode(data);
+          log("Parsed JSON data: $jsonData");
           if (jsonData['type'] == 'command') {
+            log("Handling overlay command: ${jsonData['action']}");
             _handleOverlayCommand(jsonData['action']);
           }
         }
-    setState(() {
-          _dataFromOverlay = data.toString();
-        });
+        if (mounted) {
+          setState(() {
+            _dataFromOverlay = data.toString();
+          });
+        }
       } catch (e) {
         log("Error parsing overlay data: $e");
       }
+    }, onError: (error) {
+      log("Error in overlay listener: $error");
+    }, onDone: () {
+      log("Overlay listener stream closed");
     });
+    log("Overlay listener setup completed");
   }
 
   @override
@@ -184,8 +198,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       } else {
         _selectedOcrEngine = OcrEngineType.local;
         _openAiOcrService = null;
-        print(
-            "OpenAI OCR API key not configured or invalid. Falling back to Local OCR.");
+        log("OpenAI OCR API key not configured or invalid. Falling back to Local OCR.");
       }
     } else {
       _openAiOcrService = null;
@@ -204,8 +217,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       );
     } else {
       _translationService = null; // Ensure it's null if not configured
-      print(
-          "OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
+      log("OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
       // We don't force fallback for translation, it just won't be available.
     }
 
@@ -268,7 +280,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
           results = await _localOcrService.processImageBytes(imageBytes);
         }
       } catch (e) {
-        print("Error during OCR processing: $e");
+        log("Error during OCR processing: $e");
         _statusMessage = "OCR 处理出错: $e";
         setState(() {
           _screenCaptureProcessed = true;
@@ -342,8 +354,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         flag: OverlayFlag.defaultFlag, // 允许交互
         visibility: NotificationVisibility.visibilityPublic,
         // positionGravity: PositionGravity.auto,
-        height: 56*4,
-        width: 56*4,
+        height: 56 * 4,
+        width: 56 * 4,
         startPosition: const OverlayPosition(0, -259),
       );
       setState(() {
@@ -505,7 +517,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         _translatedText = translationResult;
       });
     } catch (e) {
-      print("Error during translation call: $e");
+      log("Error during translation call: $e");
       setState(() {
         _translatedText = "翻译时发生错误: $e";
       });
@@ -584,10 +596,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
               child: CircularProgressIndicator(semanticsLabel: "正在加载设置..."))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
+                children: <Widget>[
                   Text(
                     _statusMessage, // This will display the latest status
                     textAlign: TextAlign.center,
@@ -631,7 +643,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(
-                    onPressed: () {_toggleOverlay(context);},
+                    onPressed: () {
+                      _toggleOverlay(context);
+                    },
                     child: Text(_isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
                   ),
                   const SizedBox(height: 10),
@@ -657,7 +671,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     ),
 
                   const SizedBox(height: 20),
-            const Text(
+                  const Text(
                     '使用说明:\n'
                     '1. 点击"检查/请求悬浮窗权限 (插件)"。\n'
                     '2. 点击"显示悬浮窗"激活翻译悬浮球 (可拖动)。\n'
@@ -669,10 +683,10 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     '\n注意: OCR 结果的质量取决于屏幕内容的清晰度和文本布局。',
                     textAlign: TextAlign.left,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }
