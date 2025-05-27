@@ -11,6 +11,9 @@ import 'services/settings_service.dart'; // Import Settings Service
 import 'overlay_widget.dart'; // Import the overlay widget with InteractiveOverlayUI
 import 'settings_page.dart'; // Import Settings Page
 import 'dart:convert';
+import 'dart:io'; // For HttpServer
+import 'package:shelf/shelf.dart' as shelf;
+import 'package:shelf/shelf_io.dart' as shelf_io;
 
 // Overlay Entry Point
 @pragma("vm:entry-point")
@@ -18,7 +21,7 @@ void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(
     const MaterialApp(
-      debugShowCheckedModeBanner: true,
+      debugShowCheckedModeBanner: false,
       home: InteractiveOverlayUI(), // 使用新创建的交互式悬浮窗 UI
     ),
   );
@@ -76,6 +79,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   bool _isTranslating = false;
   String _textToTranslate = ""; // To store combined OCR text
 
+  HttpServer? _commandServer; // HTTP服务器实例
+
   @override
   void initState() {
     super.initState();
@@ -84,37 +89,62 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
         LocalOcrService(); // Initialize Local OCR Service (always available as fallback or default)
     _loadAndInitializeServices(); // New method to load settings and init appropriate OCR service
     WidgetsBinding.instance.addObserver(this);
-    _setupOverlayListener();
+    _startCommandServer(); // 启动HTTP命令服务器
   }
 
-  void _setupOverlayListener() {
-    // Listen for data from overlay
-    log("Setting up overlay listener...");
-    FlutterOverlayWindow.overlayListener.listen((data) {
-      log("Data received from overlay: $data");
+  Future<void> _startCommandServer() async {
+    try {
+      var handler = const shelf.Pipeline()
+          .addMiddleware(shelf.logRequests())
+          .addHandler(_commandRequestHandler);
+
+      _commandServer = await shelf_io.serve(handler, 'localhost', 8080);
+      print('[Main] Command server started at http://localhost:8080');
+      setState(() {
+        _statusMessage = "命令服务器已启动: http://localhost:8080";
+        _updateStatusMessage();
+      });
+    } catch (e) {
+      print('[Main] Error starting command server: $e');
+      setState(() {
+        _statusMessage = "命令服务器启动失败: $e";
+        _updateStatusMessage();
+      });
+    }
+  }
+
+  Future<shelf.Response> _commandRequestHandler(shelf.Request request) async {
+    if (request.method == 'POST' && request.url.path == 'command') {
       try {
-        if (data is String && data.startsWith('{')) {
-          final Map<String, dynamic> jsonData = jsonDecode(data);
-          log("Parsed JSON data: $jsonData");
-          if (jsonData['type'] == 'command') {
-            log("Handling overlay command: ${jsonData['action']}");
-            _handleOverlayCommand(jsonData['action']);
-          }
+        final body = await request.readAsString();
+        final Map<String, dynamic> data = jsonDecode(body);
+        final String? action = data['action'] as String?;
+
+        print('[Main] Received command via HTTP: $action, data: $data');
+
+        if (action != null) {
+          // 直接调用，不再使用 addPostFrameCallback 进行测试
+          print(
+              '[Main] Attempting to call _handleOverlayCommand directly for action: $action');
+          _handleOverlayCommand(action);
+          print(
+              '[Main] _handleOverlayCommand was called directly for action: $action');
+          return shelf.Response.ok(jsonEncode({
+            'status': 'Command received and processed (direct call)',
+            'action': action
+          }));
+        } else {
+          return shelf.Response.badRequest(
+              body: jsonEncode({'error': 'Missing action in command'}));
         }
-        if (mounted) {
-          setState(() {
-            _dataFromOverlay = data.toString();
-          });
-        }
-      } catch (e) {
-        log("Error parsing overlay data: $e");
+      } catch (e, s) {
+        // 添加堆栈跟踪
+        print('[Main] Error processing HTTP command: $e\nStack trace: $s');
+        return shelf.Response.internalServerError(
+            body: jsonEncode({'error': 'Error processing command: $e'}));
       }
-    }, onError: (error) {
-      log("Error in overlay listener: $error");
-    }, onDone: () {
-      log("Overlay listener stream closed");
-    });
-    log("Overlay listener setup completed");
+    }
+    return shelf.Response.notFound(jsonEncode({'error': 'Not found'}));
   }
 
   @override
@@ -124,6 +154,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     _translationService?.dispose(); // Dispose translation service
     _targetLanguageController.dispose(); // Dispose language controller
     WidgetsBinding.instance.removeObserver(this);
+    _commandServer?.close(force: true).then((_) {
+      print('[Main] Command server stopped.');
+    });
     // It's good practice to close overlay if app is completely closing, if applicable.
     // FlutterOverlayWindow.closeOverlay();
     super.dispose();
@@ -528,26 +561,32 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
     }
   }
 
-  // 处理来自悬浮窗的命令
+  // 处理来自悬浮窗的命令 (现在由HTTP服务器调用)
   void _handleOverlayCommand(String? action) {
-    if (action == null) return;
-
-    switch (action) {
-      case 'start_fullscreen_translation':
-        log("收到全屏翻译命令");
-        _startFullscreenTranslation();
-        break;
-      case 'start_area_selection':
-        log("收到选区翻译命令");
-        _startAreaSelection();
-        break;
-      case 'reset_overlay_ui':
-        log("收到重置悬浮窗命令");
-        // 可以在这里执行任何需要的清理操作
-        break;
-      default:
-        log("未知的悬浮窗命令: $action");
+    print("[Main] _handleOverlayCommand CALLED with action: $action");
+    if (action == null) {
+      print("[Main] _handleOverlayCommand received null action.");
+      return;
     }
+
+    print("[Main] Handling overlay command: $action");
+
+    if (action == "start_fullscreen_translation") {
+      _startFullscreenTranslation();
+    } else if (action == "start_area_selection") {
+      _startAreaSelection();
+    } else if (action == "reset_overlay_ui") {
+      // 如果悬浮窗需要主应用重置某些状态（虽然它现在自己处理UI）
+      // 可以在这里添加逻辑，例如清除主应用中与悬浮窗相关的状态
+      print(
+          "[Main] Received reset_overlay_ui command. (No specific action taken in main app for now)");
+    } else {
+      print("[Main] Unknown overlay command: $action");
+    }
+    setState(() {
+      _statusMessage = "收到命令: $action";
+      _updateStatusMessage();
+    });
   }
 
   // 开始全屏翻译流程

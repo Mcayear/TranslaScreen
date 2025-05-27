@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+// import 'package:flutter_overlay_window/flutter_overlay_window.dart'; // 不再直接使用它的 listener 或 shareData
+import 'package:http/http.dart' as http;
 
 // TranslationMaskItem 类，用于表示翻译遮罩的每个条目
 class TranslationMaskItem {
@@ -47,6 +48,34 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
   // 动画控制器
   late AnimationController _menuAnimationController;
 
+  // HTTP 通信相关
+  final String _mainAppUrl = 'http://localhost:8080/command';
+
+  Future<void> _sendCommandViaHttp(String action,
+      {Map<String, dynamic>? params}) async {
+    try {
+      final payload = {
+        'action': action,
+        if (params != null) ...params,
+        'timestamp': DateTime.now().millisecondsSinceEpoch
+      };
+      final response = await http.post(
+        Uri.parse(_mainAppUrl),
+        headers: {'Content-Type': 'application/json; charset=UTF-8'},
+        body: jsonEncode(payload),
+      );
+      print(
+          '[OverlayWidget] Sent command \'$action\' via HTTP. Response: ${response.statusCode} - ${response.body}');
+      if (response.statusCode != 200) {
+        print(
+            '[OverlayWidget] Error sending command \'$action\': ${response.body}');
+      }
+    } catch (e) {
+      print(
+          '[OverlayWidget] Exception sending command \'$action\' via HTTP: $e');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -57,84 +86,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
       vsync: this,
     );
 
-    print(
-        '[OverlayWidget] Initializing and listening to FlutterOverlayWindow.overlayListener.');
-    // 监听来自主应用的消息
-    FlutterOverlayWindow.overlayListener.listen((event) {
-      print('[OverlayWidget] Raw event received by overlayListener: $event');
-      _handleMessage(event);
-    });
-  }
-
-  // 处理来自主应用的消息
-  void _handleMessage(dynamic message) {
-    if (message == null) {
-      print('[OverlayWidget] _handleMessage received null message.');
-      return;
-    }
-
-    try {
-      final Map<String, dynamic> data;
-      if (message is String) {
-        try {
-          data = jsonDecode(message) as Map<String, dynamic>;
-        } catch (e) {
-          print(
-              '[OverlayWidget] Failed to decode JSON message: $message, error: $e');
-          return;
-        }
-      } else if (message is Map<String, dynamic>) {
-        data = message;
-      } else {
-        print(
-            '[OverlayWidget] Received message of unexpected type: ${message.runtimeType}, message: $message');
-        return;
-      }
-
-      final String? type = data['type'] as String?;
-      print(
-          '[OverlayWidget] _handleMessage processing: type=$type, data=$data');
-
-      if (type == 'display_translation_mask') {
-        final List<dynamic>? items = data['items'] as List<dynamic>?;
-        if (items != null) {
-          setState(() {
-            _maskItems = items
-                .map((item) =>
-                    TranslationMaskItem.fromJson(item as Map<String, dynamic>))
-                .toList();
-            _showTranslationMask = true;
-            if (_isMenuOpen) {
-              _isMenuOpen = false;
-              _menuAnimationController.reverse();
-              FlutterOverlayWindow.resizeOverlay(56, 56, true);
-            }
-          });
-          print('[OverlayWidget] Handled "display_translation_mask".');
-        } else {
-          print(
-              '[OverlayWidget] "display_translation_mask" received null or invalid items.');
-        }
-      } else if (type == 'reset_overlay_ui') {
-        setState(() {
-          _showTranslationMask = false;
-          _maskItems.clear();
-          if (_isMenuOpen) {
-            _isMenuOpen = false;
-            _menuAnimationController.reverse();
-            FlutterOverlayWindow.resizeOverlay(56, 56, true);
-          }
-        });
-        print('[OverlayWidget] Handled "reset_overlay_ui".');
-      } else {
-        print(
-            '[OverlayWidget] Received unhandled message type: "$type". This message might be intended for the main application.');
-      }
-    } catch (e, s) {
-      print('[OverlayWidget] Error in _handleMessage: $e');
-      print('[OverlayWidget] Stacktrace: $s');
-      print('[OverlayWidget] Original message causing error: $message');
-    }
+    print('[OverlayWidget] Initialized. Communication will be via HTTP.');
   }
 
   @override
@@ -148,39 +100,28 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
     return GestureDetector(
       onTap: () {
         print("FAB tapped");
-        // 如果当前显示翻译遮罩，则关闭遮罩
         if (_showTranslationMask) {
-          final command =
-              jsonEncode({'type': 'command', 'action': 'reset_overlay_ui'});
-          print(
-              "[OverlayWidget] FAB tap (close mask): Sending command to main app: $command");
-          FlutterOverlayWindow.shareData(command);
+          _sendCommandViaHttp('reset_overlay_ui');
           setState(() {
             _showTranslationMask = false;
             _maskItems.clear();
-            // 注意：这里 FAB 的颜色会变，但大小不会变，因为菜单未涉及
           });
         } else {
-          // 否则，切换菜单展开/折叠状态
           setState(() {
             _isMenuOpen = !_isMenuOpen;
             if (_isMenuOpen) {
-              FlutterOverlayWindow.resizeOverlay(56, 56 * 3, true);
+              FlutterOverlayWindow.resizeOverlay(
+                  56, 56 * 3, true); // 尺寸调整仍需插件API
               _menuAnimationController.forward();
             } else {
-              FlutterOverlayWindow.resizeOverlay(56, 56, true);
+              // FlutterOverlayWindow.resizeOverlay(56, 56, true);
               _menuAnimationController.reverse();
             }
           });
         }
       },
       onLongPress: () {
-        // 长按触发全屏翻译
-        final command = jsonEncode(
-            {'type': 'command', 'action': 'start_fullscreen_translation'});
-        print(
-            "[OverlayWidget] FAB Long press: Sending command to main app: $command");
-        FlutterOverlayWindow.shareData(command);
+        _sendCommandViaHttp('start_fullscreen_translation');
       },
       child: Container(
         width: 56,
@@ -221,24 +162,19 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               animation: _menuAnimationController,
               builder: (context, child) {
                 return Transform.translate(
-                  offset: Offset(0, 60 * _menuAnimationController.value),
+                  offset: Offset(0, 52 * _menuAnimationController.value),
                   child: child,
                 );
               },
               child: GestureDetector(
                 onTap: () {
-                  final command = jsonEncode({
-                    'type': 'command',
-                    'action': 'start_fullscreen_translation'
+                  _sendCommandViaHttp('start_fullscreen_translation');
+                  setState(() {
+                    // 点击后关闭菜单
+                    _isMenuOpen = false;
+                    _menuAnimationController.reverse();
+                    // FlutterOverlayWindow.resizeOverlay(56, 56, true);
                   });
-                  print(
-                      "[OverlayWidget] Fullscreen button tapped: Sending command to main app: $command");
-                  FlutterOverlayWindow.shareData(command);
-                  // 点击后关闭菜单
-                  // setState(() {
-                  //   _isMenuOpen = false;
-                  //   _menuAnimationController.reverse();
-                  // });
                 },
                 child: Container(
                   width: 48,
@@ -250,9 +186,9 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.fullscreen, color: Colors.white, size: 20),
+                      Icon(Icons.fullscreen, color: Colors.white, size: 18),
                       Text('全屏',
-                          style: TextStyle(color: Colors.white, fontSize: 10)),
+                          style: TextStyle(color: Colors.white, fontSize: 9)),
                     ],
                   ),
                 ),
@@ -264,22 +200,18 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               animation: _menuAnimationController,
               builder: (context, child) {
                 return Transform.translate(
-                  offset: Offset(0, 60 * _menuAnimationController.value),
+                  offset: Offset(0, 52 * _menuAnimationController.value),
                   child: child,
                 );
               },
               child: GestureDetector(
                 onTap: () {
-                  final command = jsonEncode(
-                      {'type': 'command', 'action': 'start_area_selection'});
-                  print(
-                      "[OverlayWidget] Area selection button tapped: Sending command to main app: $command");
-                  FlutterOverlayWindow.shareData(command);
-                  // 点击后关闭菜单
+                  _sendCommandViaHttp('start_area_selection');
                   setState(() {
+                    // 点击后关闭菜单
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
-                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
+                    // FlutterOverlayWindow.resizeOverlay(56, 56, true);
                   });
                 },
                 child: Container(
@@ -292,9 +224,9 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.crop, color: Colors.white, size: 20),
+                      Icon(Icons.crop, color: Colors.white, size: 18),
                       Text('选区',
-                          style: TextStyle(color: Colors.white, fontSize: 10)),
+                          style: TextStyle(color: Colors.white, fontSize: 9)),
                     ],
                   ),
                 ),
@@ -359,19 +291,9 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
           _buildExpandedMenu(),
           // FAB
           _buildFab(),
+          _buildTranslationMask(), // 仍然尝试构建，但数据可能不会更新
         ],
       ),
     );
   }
-}
-
-// 覆盖入口点
-@pragma("vm:entry-point")
-void overlayMain() {
-  runApp(
-    const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: InteractiveOverlayUI(),
-    ),
-  );
 }
