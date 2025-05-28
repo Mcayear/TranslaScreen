@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-// import 'package:flutter_overlay_window/flutter_overlay_window.dart'; // 不再直接使用它的 listener 或 shareData
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:http/http.dart' as http;
 
 // TranslationMaskItem 类，用于表示翻译遮罩的每个条目
@@ -114,7 +114,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                   56, 56 * 3, true); // 尺寸调整仍需插件API
               _menuAnimationController.forward();
             } else {
-              // FlutterOverlayWindow.resizeOverlay(56, 56, true);
+              FlutterOverlayWindow.resizeOverlay(56, 56, true);
               _menuAnimationController.reverse();
             }
           });
@@ -173,7 +173,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                     // 点击后关闭菜单
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
-                    // FlutterOverlayWindow.resizeOverlay(56, 56, true);
+                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
                   });
                 },
                 child: Container(
@@ -211,7 +211,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                     // 点击后关闭菜单
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
-                    // FlutterOverlayWindow.resizeOverlay(56, 56, true);
+                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
                   });
                 },
                 child: Container(
