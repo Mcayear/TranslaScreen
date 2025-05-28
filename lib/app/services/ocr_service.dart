@@ -5,38 +5,7 @@ import 'dart:math'; // For Point
 
 import 'package:flutter/painting.dart'; // For decodeImageFromList (might be covered by ui import actually)
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-
-class OcrResult {
-  final String text;
-  final ui.Rect boundingBox;
-  final List<Point<int>> cornerPoints; // Changed to Point<int>
-
-  OcrResult({
-    required this.text,
-    required this.boundingBox,
-    required this.cornerPoints,
-  });
-
-  Map<String, dynamic> toJson() {
-    return {
-      'text': text,
-      'bbox': [
-        boundingBox.left,
-        boundingBox.top,
-        boundingBox.right,
-        boundingBox.bottom
-      ],
-      'cornerPoints': cornerPoints
-          .map((p) => {'x': p.x, 'y': p.y})
-          .toList(), // Works for Point<num>
-    };
-  }
-
-  @override
-  String toString() {
-    return 'Text: "$text", BBox: $boundingBox, Corners: $cornerPoints';
-  }
-}
+import 'package:transla_screen/app/core/models/ocr_result.dart'; // Updated import
 
 class LocalOcrService {
   final TextRecognizer _textRecognizer;

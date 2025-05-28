@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:math'; // For Point
 import 'package:http/http.dart' as http;
-import 'package:transla_screen/services/ocr_service.dart'; // For OcrResult
+import 'package:transla_screen/app/core/models/ocr_result.dart'; // Updated import
 import 'dart:ui' as ui; // For ui.Rect for OcrResult
 
 // Default values if not configured - API key MUST be provided.

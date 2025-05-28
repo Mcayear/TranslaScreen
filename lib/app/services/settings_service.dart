@@ -1,6 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
-
-enum OcrEngineType { local, openai }
+import 'package:transla_screen/app/core/constants/enums.dart'; // Updated import
 
 class SettingsService {
   static const String _keySelectedOcrEngine = 'selected_ocr_engine';

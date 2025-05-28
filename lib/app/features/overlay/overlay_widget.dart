@@ -49,7 +49,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
   late AnimationController _menuAnimationController;
 
   // HTTP 通信相关
-  final String _mainAppUrl = 'http://localhost:8080/command';
+  final String _mainAppUrl = 'http://localhost:10080/command';
 
   Future<void> _sendCommandViaHttp(String action,
       {Map<String, dynamic>? params}) async {
@@ -87,6 +87,34 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
     );
 
     print('[OverlayWidget] Initialized. Communication will be via HTTP.');
+    FlutterOverlayWindow.overlayListener.listen((event) {
+      if (event is Map<String, dynamic>) {
+        print('[OverlayWidget] Received data in listener: $event');
+        if (event['type'] == 'display_translation_mask' &&
+            event['items'] != null) {
+          final List<dynamic> itemsJson = event['items'];
+          setState(() {
+            _maskItems = itemsJson
+                .map((item) => TranslationMaskItem.fromJson(item))
+                .toList();
+            _showTranslationMask = true;
+            _isMenuOpen = false; // 收到遮罩数据时，如果菜单是开的就关掉
+            _menuAnimationController.reset();
+            // TODO: Make overlay fullscreen and non-interactive for mask
+            // FlutterOverlayWindow.matchParent(); // This method doesn't exist
+            // Attempt to make it very large and non-draggable for the mask.
+            FlutterOverlayWindow.resizeOverlay(
+                10000, 10000, false); // width, height, draggable
+          });
+        }
+      } else if (event is String) {
+        // 处理来自旧的 `FlutterOverlayWindow.shareData("some string");` 的简单字符串消息
+        print('[OverlayWidget] Received simple message: $event');
+        // 如果需要，可以在这里处理简单消息，例如显示一个 Snackbar 或更新一个文本区域
+      } else {
+        print('[OverlayWidget] Received unknown data type in listener: $event');
+      }
+    });
   }
 
   @override
@@ -105,6 +133,9 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
           setState(() {
             _showTranslationMask = false;
             _maskItems.clear();
+            // Restore overlay to draggable and original size
+            // Assuming 56*4 was a reasonable default interactive size. The draggable flag is set to true.
+            FlutterOverlayWindow.resizeOverlay(56 * 4, 56 * 4, true);
           });
         } else {
           setState(() {
@@ -114,7 +145,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                   56, 56 * 3, true); // 尺寸调整仍需插件API
               _menuAnimationController.forward();
             } else {
-              FlutterOverlayWindow.resizeOverlay(56, 56, true);
+              FlutterOverlayWindow.resizeOverlay(56 * 4, 56 * 4, true);
               _menuAnimationController.reverse();
             }
           });
@@ -173,7 +204,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                     // 点击后关闭菜单
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
-                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
+                    FlutterOverlayWindow.resizeOverlay(56 * 4, 56 * 4, true);
                   });
                 },
                 child: Container(
@@ -211,7 +242,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
                     // 点击后关闭菜单
                     _isMenuOpen = false;
                     _menuAnimationController.reverse();
-                    FlutterOverlayWindow.resizeOverlay(56, 56, true);
+                    FlutterOverlayWindow.resizeOverlay(56 * 4, 56 * 4, true);
                   });
                 },
                 child: Container(

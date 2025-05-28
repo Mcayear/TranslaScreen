@@ -1,0 +1,1 @@
+enum OcrEngineType { local, openai }

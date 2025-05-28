@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:transla_screen/services/settings_service.dart';
+import 'package:transla_screen/app/services/settings_service.dart';
+import 'package:transla_screen/app/core/constants/enums.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
