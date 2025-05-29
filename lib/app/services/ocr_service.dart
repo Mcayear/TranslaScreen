@@ -6,6 +6,7 @@ import 'dart:math'; // For Point
 import 'package:flutter/painting.dart'; // For decodeImageFromList (might be covered by ui import actually)
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:transla_screen/app/core/models/ocr_result.dart'; // Updated import
+import 'package:transla_screen/app/services/logger_service.dart'; // Added logger import
 
 class LocalOcrService {
   final TextRecognizer _textRecognizer;
@@ -40,7 +41,8 @@ class LocalOcrService {
       final ByteData? byteData =
           await uiImage.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (byteData == null) {
-        print("Error: Could not convert ui.Image to ByteData.");
+        log.e(
+            "[LocalOcrService] Error: Could not convert ui.Image to ByteData.");
         return [];
       }
       final Uint8List imagePlaneBytes = byteData.buffer.asUint8List();
@@ -71,8 +73,9 @@ class LocalOcrService {
       // Release the ui.Image
       uiImage.dispose();
       return ocrResults;
-    } catch (e) {
-      print("Error processing image with ML Kit: $e");
+    } catch (e, s) {
+      log.e("[LocalOcrService] Error processing image with ML Kit: $e",
+          error: e, stackTrace: s);
       return [];
     }
   }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:http/http.dart' as http;
+import 'package:transla_screen/app/services/logger_service.dart';
 
 // TranslationMaskItem 类，用于表示翻译遮罩的每个条目
 class TranslationMaskItem {
@@ -64,15 +65,17 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         headers: {'Content-Type': 'application/json; charset=UTF-8'},
         body: jsonEncode(payload),
       );
-      print(
+      log.i(
           '[OverlayWidget] Sent command \'$action\' via HTTP. Response: ${response.statusCode} - ${response.body}');
       if (response.statusCode != 200) {
-        print(
+        log.e(
             '[OverlayWidget] Error sending command \'$action\': ${response.body}');
       }
-    } catch (e) {
-      print(
-          '[OverlayWidget] Exception sending command \'$action\' via HTTP: $e');
+    } catch (e, s) {
+      log.e(
+          '[OverlayWidget] Exception sending command \'$action\' via HTTP: $e',
+          error: e,
+          stackTrace: s);
     }
   }
 
@@ -86,10 +89,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
       vsync: this,
     );
 
-    print('[OverlayWidget] Initialized. Communication will be via HTTP.');
+    log.i('[OverlayWidget] Initialized. Communication will be via HTTP.');
     FlutterOverlayWindow.overlayListener.listen((event) {
       if (event is Map<String, dynamic>) {
-        print('[OverlayWidget] Received data in listener: $event');
+        log.i('[OverlayWidget] Received data in listener: $event');
         if (event['type'] == 'display_translation_mask' &&
             event['items'] != null) {
           final List<dynamic> itemsJson = event['items'];
@@ -109,10 +112,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         }
       } else if (event is String) {
         // 处理来自旧的 `FlutterOverlayWindow.shareData("some string");` 的简单字符串消息
-        print('[OverlayWidget] Received simple message: $event');
+        log.i('[OverlayWidget] Received simple message: $event');
         // 如果需要，可以在这里处理简单消息，例如显示一个 Snackbar 或更新一个文本区域
       } else {
-        print('[OverlayWidget] Received unknown data type in listener: $event');
+        log.i('[OverlayWidget] Received unknown data type in listener: $event');
       }
     });
   }
@@ -127,7 +130,8 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
   Widget _buildFab() {
     return GestureDetector(
       onTap: () {
-        print("FAB tapped");
+        log.i(
+            "[OverlayWidget] FAB tapped. Current state: _showTranslationMask: $_showTranslationMask, _isMenuOpen: $_isMenuOpen");
         if (_showTranslationMask) {
           _sendCommandViaHttp('reset_overlay_ui');
           setState(() {
@@ -313,6 +317,8 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
 
   @override
   Widget build(BuildContext context) {
+    log.d(
+        "[OverlayWidget] Build method called. _showTranslationMask: $_showTranslationMask, _isMenuOpen: $_isMenuOpen, _maskItems count: ${_maskItems.length}");
     return Material(
       color: Colors.transparent,
       child: Stack(

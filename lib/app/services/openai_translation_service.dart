@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:transla_screen/app/services/logger_service.dart';
 
 class OpenAiTranslationService {
   final http.Client _httpClient;
@@ -18,7 +19,7 @@ class OpenAiTranslationService {
       String textToTranslate, String targetLanguage) async {
     if (apiKey.isEmpty || apiKey == 'YOUR_OPENAI_API_KEY') {
       // Also check for placeholder
-      print(
+      log.w(
           'OpenAI Translation API Key is not set or is invalid. Please configure it in settings.');
       return 'Error: Translation API Key not configured.';
     }
@@ -58,7 +59,7 @@ class OpenAiTranslationService {
         final Map<String, dynamic> responseBody =
             jsonDecode(utf8.decode(response.bodyBytes));
 
-        print("OpenAI Translation Raw Response: ${response.body}");
+        log.d("OpenAI Translation Raw Response: ${response.body}");
 
         if (responseBody['choices'] != null &&
             responseBody['choices'].isNotEmpty &&
@@ -76,18 +77,18 @@ class OpenAiTranslationService {
           }
           return translatedText.trim();
         } else {
-          print(
-              'OpenAI Translation response does not contain expected content structure.');
-          print('Response body: ${response.body}');
+          log.e(
+              'OpenAI Translation response does not contain expected content structure. Response body: ${response.body}');
           return 'Error: Translation response structure error.';
         }
       } else {
-        print(
+        log.e(
             'OpenAI Translation API Error: ${response.statusCode} - ${response.body}');
         return 'Error: Translation API Error ${response.statusCode}. Check logs.';
       }
-    } catch (e) {
-      print('Error calling OpenAI Translation API: $e');
+    } catch (e, s) {
+      log.e('Error calling OpenAI Translation API: $e',
+          error: e, stackTrace: s);
       return 'Error: Exception during translation. Check logs.';
     }
   }

@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:transla_screen/app/features/home/application/home_controller.dart';
 import 'package:transla_screen/app/features/settings/presentation/settings_page.dart';
-import 'package:transla_screen/app/core/constants/enums.dart';
+import 'package:transla_screen/main.dart'; // Import to access overlayMessageStreamGlobal
 import 'dart:typed_data'; // For Uint8List
-import 'package:transla_screen/app/core/models/ocr_result.dart'; // For OcrResult
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -26,6 +25,8 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       },
       getContext: () => context, // Pass context getter
     );
+    _controller.listenToOverlayMessages(
+        overlayMessageStreamGlobal); // Subscribe to global stream
     _controller.initialize();
     WidgetsBinding.instance.addObserver(this);
   }
@@ -41,7 +42,7 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      _controller.checkOverlayPermissionStatus();
+      _controller.loadAndInitializeServices();
     }
   }
 
@@ -123,8 +124,9 @@ class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                       _controller
                           .toggleOverlay(); // Context is now passed via getContext
                     },
-                    child:
-                        Text(_controller.isOverlayVisible ? '关闭悬浮窗' : '显示悬浮窗'),
+                    child: Text(_controller.isOverlayEffectivelyVisible
+                        ? '关闭悬浮窗'
+                        : '显示悬浮窗'),
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as shelf_io;
+import 'package:transla_screen/app/services/logger_service.dart';
 
 typedef CommandHandlerCallback = void Function(String action);
 
@@ -18,16 +19,22 @@ class CommandServerService {
 
   Future<void> startServer() async {
     try {
-      var handler = const shelf.Pipeline()
-          .addMiddleware(shelf
-              .logRequests()) // Consider making logging optional or configurable
-          .addHandler(_requestHandler);
+      var handler = const shelf.Pipeline().addMiddleware(shelf.logRequests(
+        logger: (message, isError) {
+          if (isError) {
+            log.e('[Shelf] $message');
+          } else {
+            log.i('[Shelf] $message');
+          }
+        },
+      )).addHandler(_requestHandler);
 
       _server = await shelf_io.serve(handler, 'localhost', 10080);
-      print('[CommandServerService] Server started at http://localhost:10080');
+      log.i('[CommandServerService] Server started at http://localhost:10080');
       _updateStatusMessage("命令服务器已启动: http://localhost:10080");
-    } catch (e) {
-      print('[CommandServerService] Error starting server: $e');
+    } catch (e, s) {
+      log.e('[CommandServerService] Error starting server: $e',
+          error: e, stackTrace: s);
       _updateStatusMessage("命令服务器启动失败: $e");
     }
   }
@@ -39,7 +46,7 @@ class CommandServerService {
         final Map<String, dynamic> data = jsonDecode(body);
         final String? action = data['action'] as String?;
 
-        print(
+        log.i(
             '[CommandServerService] Received command via HTTP: $action, data: $data');
 
         if (action != null) {
@@ -53,8 +60,8 @@ class CommandServerService {
               body: jsonEncode({'error': 'Missing action in command'}));
         }
       } catch (e, s) {
-        print(
-            '[CommandServerService] Error processing HTTP command: $e\nStack trace: $s');
+        log.e('[CommandServerService] Error processing HTTP command: $e',
+            error: e, stackTrace: s);
         return shelf.Response.internalServerError(
             body: jsonEncode({'error': 'Error processing command: $e'}));
       }
@@ -64,6 +71,6 @@ class CommandServerService {
 
   Future<void> stopServer() async {
     await _server?.close(force: true);
-    print('[CommandServerService] Server stopped.');
+    log.i('[CommandServerService] Server stopped.');
   }
 }

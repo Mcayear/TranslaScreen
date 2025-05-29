@@ -14,6 +14,8 @@ class SettingsService {
       'openai_translation_api_endpoint';
   static const String _keyOpenAiTranslationModelName =
       'openai_translation_model_name';
+  static const String _keyTargetLanguage =
+      'target_language'; // Key for target language
 
   // Default values
   static const String defaultOpenAiEndpoint =
@@ -21,7 +23,10 @@ class SettingsService {
   static const String defaultOpenAiModel =
       'gpt-4-vision-preview'; // Or 'gpt-4o', 'gpt-4-turbo'
   // Default for translation
+  static const String defaultOpenAiTranslationEndpoint =
+      'https://api.openai.com/v1/chat/completions'; // Added default
   static const String defaultOpenAiTranslationModel = 'gpt-3.5-turbo';
+  static const String defaultTargetLanguage = '中文'; // Default target language
 
   Future<SharedPreferences> _getPrefs() async {
     return await SharedPreferences.getInstance();
@@ -104,7 +109,7 @@ class SettingsService {
   Future<String> getOpenAiTranslationApiEndpoint() async {
     final prefs = await _getPrefs();
     return prefs.getString(_keyOpenAiTranslationApiEndpoint) ??
-        defaultOpenAiEndpoint; // Can use same default endpoint
+        defaultOpenAiTranslationEndpoint; // Uses its own default or shared
   }
 
   // --- OpenAI Translation Model Name ---
@@ -123,8 +128,20 @@ class SettingsService {
   Future<Map<String, String>> getOpenAiTranslationConfig() async {
     return {
       'apiKey': await getOpenAiTranslationApiKey() ?? '',
-      'apiEndpoint': await getOpenAiTranslationApiEndpoint(),
+      'apiEndpoint':
+          await getOpenAiTranslationApiEndpoint(), // Uses its own default or shared
       'modelName': await getOpenAiTranslationModelName(),
     };
+  }
+
+  // --- Target Language ---
+  Future<void> setTargetLanguage(String language) async {
+    final prefs = await _getPrefs();
+    await prefs.setString(_keyTargetLanguage, language);
+  }
+
+  Future<String> getTargetLanguage() async {
+    final prefs = await _getPrefs();
+    return prefs.getString(_keyTargetLanguage) ?? defaultTargetLanguage;
   }
 }

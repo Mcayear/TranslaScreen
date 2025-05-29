@@ -4,6 +4,7 @@ import 'dart:math'; // For Point
 import 'package:http/http.dart' as http;
 import 'package:transla_screen/app/core/models/ocr_result.dart'; // Updated import
 import 'dart:ui' as ui; // For ui.Rect for OcrResult
+import 'package:transla_screen/app/services/logger_service.dart'; // Import logger
 
 // Default values if not configured - API key MUST be provided.
 const String _defaultOpenAiApiEndpoint =
@@ -29,7 +30,7 @@ class OpenAiOcrService {
   Future<List<OcrResult>> processImageBytes(
       Uint8List pngImageBytes, int imageWidth, int imageHeight) async {
     if (apiKey.isEmpty || apiKey == 'YOUR_OPENAI_API_KEY') {
-      print('OpenAI API Key is not set or is invalid. Please configure it.');
+      log.w('OpenAI API Key is not set or is invalid. Please configure it.');
       return [
         OcrResult(
             text: "OpenAI API Key not configured or invalid.",
@@ -83,7 +84,7 @@ class OpenAiOcrService {
         final Map<String, dynamic> responseBody =
             jsonDecode(utf8.decode(response.bodyBytes));
 
-        print("OpenAI Raw Response: ${response.body}");
+        log.d("OpenAI Raw Response: ${response.body}");
 
         if (responseBody['choices'] != null &&
             responseBody['choices'].isNotEmpty &&
@@ -135,11 +136,11 @@ class OpenAiOcrService {
               }
             }
             return ocrResults;
-          } catch (e) {
-            print('Error parsing OpenAI OCR results JSON: $e');
-            print(
-                'Problematic content direct from API: ${responseBody['choices'][0]['message']['content']}');
-            print('Processed content for parsing: $content');
+          } catch (e, s) {
+            log.e(
+                'Error parsing OpenAI OCR results JSON: $e. Problematic content: ${responseBody['choices'][0]['message']['content']}. Processed content for parsing: $content',
+                error: e,
+                stackTrace: s);
             return [
               OcrResult(
                   text:
@@ -149,8 +150,8 @@ class OpenAiOcrService {
             ];
           }
         } else {
-          print('OpenAI response does not contain expected content structure.');
-          print('Response body: ${response.body}');
+          log.e(
+              'OpenAI response does not contain expected content structure. Response body: ${response.body}');
           return [
             OcrResult(
                 text: "OpenAI response structure error. Full response in logs.",
@@ -159,7 +160,7 @@ class OpenAiOcrService {
           ];
         }
       } else {
-        print('OpenAI API Error: ${response.statusCode} - ${response.body}');
+        log.e('OpenAI API Error: ${response.statusCode} - ${response.body}');
         return [
           OcrResult(
               text: "OpenAI API Error ${response.statusCode}. Details in logs.",
@@ -167,8 +168,8 @@ class OpenAiOcrService {
               cornerPoints: [])
         ];
       }
-    } catch (e) {
-      print('Error calling OpenAI API: $e');
+    } catch (e, s) {
+      log.e('Error calling OpenAI API: $e', error: e, stackTrace: s);
       return [
         OcrResult(
             text: "Exception calling OpenAI: $e",

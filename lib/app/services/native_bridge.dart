@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:transla_screen/app/services/logger_service.dart';
 
 class NativeBridge {
   static const MethodChannel _channel =
@@ -15,8 +16,11 @@ class NativeBridge {
           await _channel.invokeMethod<Uint8List>('startScreenCapture');
       return imageBytes;
     } on PlatformException catch (e) {
-      print(
-          "Failed to start screen capture or get image bytes: '${e.message}'.");
+      log.e(
+          "[NativeBridge] Failed to start screen capture or get image bytes: '${e.message}'. Code: ${e.code}. Details: ${e.details}",
+          error: e
+          // stackTrace: e.stacktrace, // Removed as e.stacktrace is String? and logger can handle it from error: e
+          );
       return null;
     }
   }
