@@ -5,10 +5,6 @@ class NativeBridge {
   static const MethodChannel _channel =
       MethodChannel('com.example.transla_screen/screen_capture');
 
-  // requestSystemAlertWindowPermission and canDrawOverlays are now handled by flutter_overlay_window plugin
-  // static Future<bool> requestSystemAlertWindowPermission() async { ... }
-  // static Future<bool> canDrawOverlays() async { ... }
-
   // 启动屏幕捕获意图并返回截图的字节数据
   static Future<Uint8List?> startScreenCapture() async {
     try {

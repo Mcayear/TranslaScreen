@@ -159,8 +159,8 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         _sendCommandViaHttp('start_fullscreen_translation');
       },
       child: Container(
-        width: 56,
-        height: 56,
+        width: 256,
+        height: 256,
         decoration: BoxDecoration(
           color: _showTranslationMask
               ? Colors.red
@@ -325,10 +325,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         alignment: Alignment.topCenter,
         children: [
           // 展开的菜单
-          _buildExpandedMenu(),
+          // _buildExpandedMenu(),
           // FAB
           _buildFab(),
-          _buildTranslationMask(), // 仍然尝试构建，但数据可能不会更新
+          // _buildTranslationMask(), // 仍然尝试构建，但数据可能不会更新
         ],
       ),
     );
