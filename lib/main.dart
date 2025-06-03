@@ -17,8 +17,9 @@ Future<void> overlayMain() async {
   // Make overlayMain async if LoggerService.init is used here
   WidgetsFlutterBinding.ensureInitialized();
   // It might be beneficial to also initialize logger for the overlay isolate
-  // await LoggerService.init(); // Consider if overlay needs separate log files or config
-  // setupExceptionHandling(); // And exception handling
+  await LoggerService
+      .init(); // Consider if overlay needs separate log files or config
+  setupExceptionHandling(); // And exception handling
   runApp(
     const MaterialApp(
       debugShowCheckedModeBanner: false,

@@ -156,11 +156,11 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         }
       },
       onLongPress: () {
-        _sendCommandViaHttp('start_fullscreen_translation');
+        _sendCommandViaHttp('translate_fullscreen');
       },
       child: Container(
-        width: 256,
-        height: 256,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(
           color: _showTranslationMask
               ? Colors.red
@@ -203,7 +203,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               },
               child: GestureDetector(
                 onTap: () {
-                  _sendCommandViaHttp('start_fullscreen_translation');
+                  _sendCommandViaHttp('translate_fullscreen');
                   setState(() {
                     // 点击后关闭菜单
                     _isMenuOpen = false;
@@ -325,10 +325,10 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
         alignment: Alignment.topCenter,
         children: [
           // 展开的菜单
-          // _buildExpandedMenu(),
+          _buildExpandedMenu(),
           // FAB
           _buildFab(),
-          // _buildTranslationMask(), // 仍然尝试构建，但数据可能不会更新
+          _buildTranslationMask(), // 仍然尝试构建，但数据可能不会更新
         ],
       ),
     );
