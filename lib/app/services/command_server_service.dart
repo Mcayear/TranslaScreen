@@ -5,7 +5,8 @@ import 'package:shelf/shelf.dart' as shelf;
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:transla_screen/app/services/logger_service.dart';
 
-typedef CommandHandlerCallback = void Function(String action);
+typedef CommandHandlerCallback = void Function(
+    String action, Map<String, dynamic>? params);
 
 class CommandServerService {
   HttpServer? _server;
@@ -45,12 +46,14 @@ class CommandServerService {
         final body = await request.readAsString();
         final Map<String, dynamic> data = jsonDecode(body);
         final String? action = data['action'] as String?;
+        final Map<String, dynamic>? params =
+            data['params'] as Map<String, dynamic>?;
 
         log.i(
             '[CommandServerService] Received command via HTTP: $action, data: $data');
 
         if (action != null) {
-          onCommandReceived(action);
+          onCommandReceived(action, params);
           return shelf.Response.ok(jsonEncode({
             'status': 'Command received and processed by CommandServerService',
             'action': action

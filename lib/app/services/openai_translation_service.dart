@@ -59,7 +59,7 @@ class OpenAiTranslationService {
         final Map<String, dynamic> responseBody =
             jsonDecode(utf8.decode(response.bodyBytes));
 
-        log.d("OpenAI Translation Raw Response: ${response.body}");
+        // log.d("OpenAI Translation Raw Response: ${response.body}");
 
         if (responseBody['choices'] != null &&
             responseBody['choices'].isNotEmpty &&

@@ -1,11 +1,5 @@
-import 'dart:io'; // For File operations
+import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui'
-as ui; // For Rect, Size, Offset, Image, decodeImageFromList, ImageByteFormat
-
-//flutter/painting.dart is implicitly imported by flutter/material.dart or flutter/widgets.dart
-//If you are not using Material or Widgets directly, then explicit import is fine.
-//import 'package:flutter/painting.dart';
 
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart'; // For temporary directory
@@ -39,7 +33,7 @@ class LocalOcrService {
 
       // 4. Process the image
       final RecognizedText recognizedText =
-      await _textRecognizer.processImage(inputImage);
+          await _textRecognizer.processImage(inputImage);
 
       final List<OcrResult> ocrResults = [];
       for (TextBlock block in recognizedText.blocks) {
@@ -64,8 +58,9 @@ class LocalOcrService {
           await tempFile.delete();
           // log.d("[LocalOcrService] Temporary OCR image deleted: ${tempFile.path}");
         }
-      } catch (e,s) {
-        log.w("[LocalOcrService] Error deleting temporary OCR image: $e", error: e, stackTrace: s);
+      } catch (e, s) {
+        log.w("[LocalOcrService] Error deleting temporary OCR image: $e",
+            error: e, stackTrace: s);
       }
     }
   }

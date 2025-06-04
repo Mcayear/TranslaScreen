@@ -8,11 +8,14 @@ class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  MyHomePageState createState() => MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
+class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
   late final HomeController _controller;
+
+  // 公开controller以便外部访问
+  HomeController get controller => _controller;
 
   @override
   void initState() {

@@ -86,14 +86,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.0.0"
-  flutter_overlay_window:
-    dependency: "direct main"
-    description:
-      name: flutter_overlay_window
-      sha256: "17988420249da68e421d1b44b511e6113d3de7a9e52c3fbd6d99730508af4580"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.5.0"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -200,6 +192,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.16.0"
+  overlay_windows_plugin:
+    dependency: "direct main"
+    description:
+      name: overlay_windows_plugin
+      sha256: "99d0c2ff877d2ed6fabd65bb2592f6dc1eaccc5fac666e95b67553f6924f22f4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.5"
   path:
     dependency: transitive
     description:

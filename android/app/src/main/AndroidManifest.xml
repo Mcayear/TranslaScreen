@@ -36,12 +36,8 @@
             android:name="flutterEmbedding"
             android:value="2" />
         
-        <service android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="screen_translation_overlay"/>
-        </service>
+        <service android:name="com.ducdd.overlay_windows_plugin.OverlayService"
+            android:exported="false" />
 
         <!-- Declare the ScreenCaptureService -->
         <service
