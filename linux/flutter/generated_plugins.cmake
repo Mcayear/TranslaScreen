@@ -3,7 +3,6 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  overlay_windows_plugin
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

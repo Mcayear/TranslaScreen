@@ -53,6 +53,9 @@ class MainActivity : FlutterActivity() {
     // --- Reusable Objects ---
     private val reusableOutputStream = ByteArrayOutputStream()
 
+    // --- 原生悬浮窗插件 ---
+    private val nativeOverlayPlugin = NativeOverlayPlugin()
+
     // --- MediaProjection Callback ---
     private val mediaProjectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -73,6 +76,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        
+        // 注册原生悬浮窗插件
+        flutterEngine.plugins.add(nativeOverlayPlugin)
+        
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         Log.d(TAG, "configureFlutterEngine called and MediaProjectionManager initialized.")
 

@@ -30,10 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  overlay_windows_plugin: ^0.0.5 # 替换为新的插件
   google_mlkit_text_recognition: ^0.15.0 # Added ML Kit Text Recognition
   http: ^1.4.0
-  shelf: ^1.4.2
   shared_preferences: ^2.5.3 # Added shared_preferences
   logger: ^2.3.0 # Add logger
   path_provider: ^2.1.3 # Add path_provider

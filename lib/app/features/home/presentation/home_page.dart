@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:transla_screen/app/features/home/application/home_controller.dart';
 import 'package:transla_screen/app/features/settings/presentation/settings_page.dart';
-import 'package:transla_screen/main.dart'; // Import to access overlayMessageStreamGlobal
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -27,8 +26,6 @@ class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
       },
       getContext: () => context, // Pass context getter
     );
-    _controller.listenToOverlayMessages(
-        overlayMessageStreamGlobal); // Subscribe to global stream
     _controller.initialize();
     WidgetsBinding.instance.addObserver(this);
   }
