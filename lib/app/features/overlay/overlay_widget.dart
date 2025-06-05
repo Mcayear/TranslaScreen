@@ -6,12 +6,12 @@ import 'package:http/http.dart' as http;
 
 /// 控制Overlay，只有FAB和菜单
 class InteractiveOverlayUI extends StatefulWidget {
-  const InteractiveOverlayUI({Key? key}) : super(key: key);
+  const InteractiveOverlayUI({super.key});
   @override
-  _InteractiveOverlayUIState createState() => _InteractiveOverlayUIState();
+  InteractiveOverlayUIState createState() => InteractiveOverlayUIState();
 }
 
-class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
+class InteractiveOverlayUIState extends State<InteractiveOverlayUI>
     with SingleTickerProviderStateMixin {
   bool _isMenuOpen = false;
   late AnimationController _menuAnimationController;
@@ -62,10 +62,11 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
     setState(() {
       _isMenuOpen = !_isMenuOpen;
     });
-    if (_isMenuOpen)
+    if (_isMenuOpen) {
       _menuAnimationController.forward();
-    else
+    } else {
       _menuAnimationController.reverse();
+    }
   }
 
   @override
@@ -101,7 +102,9 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primary,
                 shape: BoxShape.circle,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 4)
+                ],
               ),
               child: Icon(
                 _isMenuOpen ? Icons.close : Icons.translate,
@@ -123,7 +126,7 @@ class _InteractiveOverlayUIState extends State<InteractiveOverlayUI>
       child: Container(
         width: 48,
         height: 48,
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           color: Colors.blue,
           shape: BoxShape.circle,
         ),

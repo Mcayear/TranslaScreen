@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:transla_screen/app/features/home/application/home_controller.dart';
 import 'package:transla_screen/app/features/settings/presentation/settings_page.dart';
 import 'package:transla_screen/main.dart'; // Import to access overlayMessageStreamGlobal
-import 'dart:typed_data'; // For Uint8List
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({super.key});
@@ -83,17 +82,6 @@ class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 16),
                   ),
-                  // _dataFromOverlay is not directly in controller, might need specific handling or removal if not used
-                  // if (_controller.dataFromOverlay.isNotEmpty)
-                  //   Padding(
-                  //     padding: const EdgeInsets.symmetric(vertical: 8.0),
-                  //     child: Text(
-                  //       "来自悬浮窗的数据: ${_controller.dataFromOverlay}",
-                  //       textAlign: TextAlign.center,
-                  //       style: const TextStyle(
-                  //           fontSize: 14, color: Colors.blueAccent),
-                  //     ),
-                  //   ),
                   const SizedBox(height: 10),
                   if (_controller.capturedImageBytes != null)
                     Column(
@@ -109,7 +97,7 @@ class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                           Padding(
                             padding: const EdgeInsets.only(top: 8.0),
                             child: Text(
-                                "OCR识别文本 (首条): '${_controller.ocrResults.first.text}'",
+                                "OCR识别结果 (${_controller.ocrResults.length} 条):\n${_controller.ocrResults.map((r) => "  - \"${r.text}\" (区域: ${r.boundingBox.left}, ${r.boundingBox.top}, ${r.boundingBox.width}, ${r.boundingBox.height})").join('\n')}",
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                     color: Colors.deepPurpleAccent)),

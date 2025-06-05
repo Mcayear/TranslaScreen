@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -28,7 +29,7 @@ class HomeController {
 
   // 定义悬浮球和翻译遮罩的ID
   final String _controlOverlayId = "control_overlay";
-  final String _translationMaskId = "translation_mask";
+  final String _translationMaskId = "translation_mask_overlay";
 
   // 记录当前活跃的overlay窗口ID
   final Set<String> _activeOverlayIds = <String>{};
@@ -67,6 +68,7 @@ class HomeController {
 
   Future<void> initialize() async {
     isInitializing = true;
+    log.i("[HomeController] 正在初始化服务...");
     _updateStatusMessageUI("正在初始化服务...");
 
     _settingsService = SettingsService();
@@ -93,7 +95,11 @@ class HomeController {
     }
 
     // 检查当前overlay权限状态
-    _isOverlayPermissionGranted = await _overlayPlugin.isPermissionGranted();
+    if (Platform.isAndroid || Platform.isIOS) {
+      _isOverlayPermissionGranted = await _overlayPlugin.isPermissionGranted();
+    } else {
+      _isOverlayPermissionGranted = true;
+    }
 
     // 检查当前悬浮球是否活跃（不检查是否已创建，因为新API创建后就会自动启动）
     _isControlOverlayActive = _activeOverlayIds.contains(_controlOverlayId);
@@ -184,7 +190,11 @@ class HomeController {
   }
 
   Future<void> _updateOverlayStatus({String? baseMessage}) async {
-    _isOverlayPermissionGranted = await _overlayPlugin.isPermissionGranted();
+    if (Platform.isAndroid || Platform.isIOS) {
+      _isOverlayPermissionGranted = await _overlayPlugin.isPermissionGranted();
+    } else {
+      _isOverlayPermissionGranted = true;
+    }
 
     String permStatus =
         "悬浮窗权限: ${_isOverlayPermissionGranted ? '已授予' : '未授予'}.";
@@ -208,6 +218,8 @@ class HomeController {
   }
 
   Future<void> requestOverlayPermission() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+
     _updateStatusMessageUI('正在请求悬浮窗权限...');
     await _overlayPlugin.requestPermission();
     _isOverlayPermissionGranted = await _overlayPlugin.isPermissionGranted();
@@ -230,14 +242,16 @@ class HomeController {
     _updateStatusMessageUI('准备捕获屏幕...');
 
     if (sendToTranslationMask) {
-      if (!_isOverlayPermissionGranted) {
-        _updateStatusMessageUI('悬浮窗权限未授予。请先授权再尝试发送到悬浮窗。');
-        await requestOverlayPermission(); // Prompt for permission
-        if (!await _overlayPlugin.isPermissionGranted()) {
-          log.w(
-              "Overlay permission still not granted after prompt for OCR send.");
-          _updateStatusMessageUI('悬浮窗权限未授予，无法发送结果。');
-          return;
+      if (Platform.isAndroid || Platform.isIOS) {
+        if (!_isOverlayPermissionGranted) {
+          _updateStatusMessageUI('悬浮窗权限未授予。请先授权再尝试发送到悬浮窗。');
+          await requestOverlayPermission(); // Prompt for permission
+          if (!await _overlayPlugin.isPermissionGranted()) {
+            log.w(
+                "Overlay permission still not granted after prompt for OCR send.");
+            _updateStatusMessageUI('悬浮窗权限未授予，无法发送结果。');
+            return;
+          }
         }
       }
     }
@@ -271,26 +285,39 @@ class HomeController {
         if (ocrResults.isEmpty) {
           _updateStatusMessageUI('OCR未能识别任何文本。');
         } else {
-          String fullOcrText = ocrResults
-              .map((e) => e.text)
-              .join("\n")
-              .replaceAll(RegExp(r'\s+'), ' ')
-              .trim();
-
           if (_translationService != null) {
             _updateStatusMessageUI(
                 'OCR识别完成。正在翻译到${targetLanguageController.text}...');
-            translatedText = await _translationService!
-                .translate(fullOcrText, targetLanguageController.text);
-            _updateStatusMessageUI('翻译完成。');
 
-            // 如果需要发送到overlay，则展示译文遮罩
-            if (sendToTranslationMask) {
-              await _displayTranslationMask(ocrResults, translatedText);
+            // 使用结构化翻译API
+            Map<String, String> translations = await _translationService!
+                .translateStructured(ocrResults, targetLanguageController.text);
+
+            // 检查是否有错误
+            if (translations.containsKey('error')) {
+              _updateStatusMessageUI('翻译过程中发生错误: ${translations['error']}');
+              translatedText = ocrResults.map((e) => e.text).join("\n");
+            } else {
+              // 根据翻译结果处理每个OCR项
+              for (var result in ocrResults) {
+                if (translations.containsKey(result.text)) {
+                  // 保存原始OCR文本，用于显示
+                  String originalText = result.text;
+                  // 将译文与原文关联
+                  translatedText += "${translations[originalText]}\n";
+                }
+              }
+
+              translatedText = translatedText.trim();
+              _updateStatusMessageUI('翻译完成。');
+
+              // 如果需要发送到overlay，则展示译文遮罩
+              if (sendToTranslationMask) {
+                await _displayTranslationMask(ocrResults, translations);
+              }
             }
           } else {
-            translatedText =
-                fullOcrText; // Just show OCR text if no translation service
+            translatedText = ocrResults.map((e) => e.text).join("\n");
             _updateStatusMessageUI('OCR识别完成。未配置翻译服务。');
           }
         }
@@ -307,36 +334,20 @@ class HomeController {
   }
 
   Future<void> _displayTranslationMask(
-      List<OcrResult> ocrResults, String translatedText) async {
+      List<OcrResult> ocrResults, Map<String, String> translations) async {
     if (ocrResults.isEmpty) return;
 
     log.i('[HomeController] 准备显示翻译遮罩，OCR结果: ${ocrResults.length}个');
-
-    // 分割译文，尝试匹配OCR文本块
-    List<String> translatedParts = [];
-    try {
-      // 简单分割，可能需要更复杂的算法
-      translatedParts = translatedText.split('\n');
-      if (translatedParts.length == 1 && ocrResults.length > 1) {
-        // 如果只有一段译文但有多个OCR区块，每个OCR区块显示相同译文
-        translatedParts = List.filled(ocrResults.length, translatedText);
-      }
-    } catch (e) {
-      log.e('[HomeController] 分割译文错误: $e', error: e);
-      // 如果分割错误，就将整个译文显示在每个OCR区块
-      translatedParts = List.filled(ocrResults.length, translatedText);
-    }
 
     // 准备用于遮罩显示的数据
     List<Map<String, dynamic>> maskItems = [];
     for (int i = 0; i < ocrResults.length; i++) {
       var result = ocrResults[i];
-      String translatedPart = i < translatedParts.length
-          ? translatedParts[i]
-          : translatedParts.last; // 使用最后一段译文作为缺失部分
+      // 从翻译Map中获取对应的译文
+      String translatedText = translations[result.text] ?? result.text;
 
       log.i(
-          '[HomeController] 添加翻译项 #$i: 位置=${result.boundingBox}, 原文=${result.text}, 译文=${translatedPart}');
+          '[HomeController] 添加翻译项 #$i: 位置=${result.boundingBox}, 原文=${result.text}, 译文=${translatedText}');
 
       maskItems.add({
         'bbox': {
@@ -346,7 +357,7 @@ class HomeController {
           'h': result.boundingBox.height,
         },
         'originalText': result.text,
-        'translatedText': translatedPart,
+        'translatedText': translatedText,
       });
     }
 
@@ -388,7 +399,11 @@ class HomeController {
       log.i('[HomeController] 正在创建译文遮罩窗口');
 
       // 检查插件状态
-      final bool isPermGranted = await _overlayPlugin.isPermissionGranted();
+      bool isPermGranted = true;
+      // 判断是 android, ios 才执行
+      if (Platform.isAndroid || Platform.isIOS) {
+        isPermGranted = await _overlayPlugin.isPermissionGranted();
+      }
       log.i('[HomeController] 插件权限状态: $isPermGranted');
 
       // 获取当前屏幕尺寸
@@ -515,14 +530,22 @@ class HomeController {
     await _updateOverlayStatus();
   }
 
-  void _handleDataFromOverlay(dynamic data) {
+  void _handleDataFromOverlay(dynamic data) async {
     log.i("[HomeController] Received overlay data: $data");
     if (data is Map<String, dynamic>) {
       if (data['type'] == 'mask_closed') {
-        log.i("[HomeController] Translation mask was closed by user.");
-        // 译文遮罩被用户关闭，清理状态
-        if (_activeOverlayIds.contains(_translationMaskId)) {
+        log.i("[HomeController] 收到译文遮罩关闭请求，准备关闭遮罩窗口");
+        // 译文遮罩被用户关闭，主动尝试关闭遮罩
+        try {
+          log.i("[HomeController] 关闭译文遮罩窗口: $_translationMaskId");
+          await _overlayPlugin.closeOverlayWindow(_translationMaskId);
           _activeOverlayIds.remove(_translationMaskId);
+          await _overlayPlugin.closeOverlayWindow("translation_mask_test");
+          log.i("[HomeController] 译文遮罩已从活跃列表中移除");
+          // 更新UI状态
+          _updateStatusMessageUI("已关闭译文遮罩");
+        } catch (e, s) {
+          log.e("[HomeController] 关闭译文遮罩窗口失败: $e", error: e, stackTrace: s);
         }
       }
     } else if (data is String) {
@@ -561,61 +584,5 @@ class HomeController {
       statusMessage = message;
     }
     updateUi();
-  }
-
-  /// 测试方法：显示模拟的译文遮罩数据
-  Future<void> testTranslationMaskOverlay() async {
-    log.i('[HomeController] 开始测试译文遮罩');
-
-    // 请求权限（如果需要）
-    if (!_isOverlayPermissionGranted) {
-      log.i('[HomeController] 请求悬浮窗权限');
-      await requestOverlayPermission();
-    }
-
-    // 模拟OCR结果数据
-    List<Map<String, dynamic>> mockItems = [
-      {
-        'bbox': {
-          'l': 100.0,
-          't': 200.0,
-          'w': 400.0,
-          'h': 80.0,
-        },
-        'originalText': 'Hello World',
-        'translatedText': '你好世界',
-      },
-      {
-        'bbox': {
-          'l': 100.0,
-          't': 400.0,
-          'w': 500.0,
-          'h': 100.0,
-        },
-        'originalText': 'This is a test',
-        'translatedText': '这是一个测试',
-      },
-      {
-        'bbox': {
-          'l': 100.0,
-          't': 600.0,
-          'w': 300.0,
-          'h': 60.0,
-        },
-        'originalText': 'Translation Mask',
-        'translatedText': '翻译遮罩',
-      },
-    ];
-
-    log.i('[HomeController] 准备显示测试遮罩，项目数量: ${mockItems.length}');
-
-    try {
-      // 创建并显示新的译文遮罩
-      await _showTranslationMaskOverlay(mockItems);
-      log.i('[HomeController] 测试遮罩显示完成');
-    } catch (e, s) {
-      log.e('[HomeController] 测试遮罩显示失败: $e', error: e, stackTrace: s);
-      _updateStatusMessageUI('测试遮罩显示失败: $e');
-    }
   }
 }

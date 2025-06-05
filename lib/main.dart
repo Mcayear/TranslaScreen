@@ -33,7 +33,7 @@ void overlayControlMain() async {
 
 // 译文遮罩入口点
 @pragma("vm:entry-point")
-void translation_mask_test() async {
+void overlayTranslationMaskMain() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     await LoggerService.init();
@@ -53,28 +53,6 @@ void translation_mask_test() async {
                 // 添加监听器和渲染译文项
                 Builder(
                   builder: (context) {
-                    // 启动消息监听
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      final _overlayPlugin =
-                          OverlayWindowsPlugin.defaultInstance;
-                      _overlayPlugin.messageStream.listen((event) {
-                        log.i('[TranslationOverlay] 收到消息: ${event.message}');
-                        if (event.message is Map<String, dynamic> &&
-                            event.message['type'] ==
-                                'display_translation_mask' &&
-                            event.message['items'] is List) {
-                          final List<dynamic> items = event.message['items'];
-                          log.i(
-                              '[TranslationOverlay] 收到翻译数据: ${items.length}项');
-
-                          // 这里可以在接收到消息时处理数据并更新UI
-                          // 可以通过Navigator.of(context).pushReplacement等方式
-                          // 切换到TranslationMaskOverlay组件显示译文
-                          // 或使用状态管理将数据传递给其他组件
-                        }
-                      });
-                    });
-
                     return const TranslationMaskOverlay();
                   },
                 ),
@@ -104,8 +82,8 @@ Future<void> main() async {
   setupExceptionHandling();
 
   // 初始化并监听overlay消息
-  final _overlayWindowsPlugin = OverlayWindowsPlugin.defaultInstance;
-  _overlayWindowsPlugin.messageStream.listen((event) {
+  final overlayWindowsPlugin = OverlayWindowsPlugin.defaultInstance;
+  overlayWindowsPlugin.messageStream.listen((event) {
     log.i(
         "[MainApp] 收到数据: ${event.overlayWindowId}, message: ${event.message}");
     overlayMessageControllerGlobal.sink.add(event.message);
@@ -114,7 +92,7 @@ Future<void> main() async {
   });
 
   runApp(const MyApp());
-  runTestAfterAppStart();
+  // runTestAfterAppStart();
 }
 
 // 全局HomeController实例
@@ -151,24 +129,22 @@ void runTestAfterAppStart() {
   log.i("[Main] 屏幕尺寸: ${screenWidth.toInt()} x ${screenHeight.toInt()}");
 
   // 显示窗口
-  final _overlayPlugin = OverlayWindowsPlugin.defaultInstance;
+  final overlayPlugin = OverlayWindowsPlugin.defaultInstance;
 
-  _overlayPlugin.isPermissionGranted().then((hasPermission) {
+  overlayPlugin.isPermissionGranted().then((hasPermission) {
     log.i("[Main] 悬浮窗权限: $hasPermission");
 
     if (!hasPermission) {
       log.i("[Main] 请求悬浮窗权限");
-      _overlayPlugin.requestPermission();
+      overlayPlugin.requestPermission();
       return;
     }
 
     // 显示译文遮罩窗口
-    final overlayId = "translation_mask_test";
-
-    _overlayPlugin
+    overlayPlugin
         .showOverlayWindow(
-      overlayId,
-      overlayId,
+      "translation_mask_overlay",
+      "overlayTranslationMaskMain",
       OverlayWindowConfig(
         width: screenWidth.toInt(),
         height: screenHeight.toInt(),
@@ -180,9 +156,9 @@ void runTestAfterAppStart() {
       log.i("[Main] 译文遮罩窗口已创建");
 
       // 发送测试数据
-      Future.delayed(Duration(milliseconds: 500), () {
+      Future.delayed(const Duration(milliseconds: 500), () {
         log.i("[Main] 发送测试数据到遮罩");
-        _overlayPlugin.sendMessage(overlayId, {
+        overlayPlugin.sendMessage("translation_mask_overlay", {
           'type': 'display_translation_mask',
           'items': [
             {

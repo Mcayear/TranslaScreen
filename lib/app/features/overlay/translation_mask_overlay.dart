@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:overlay_windows_plugin/overlay_windows_plugin.dart';
 import 'package:transla_screen/app/services/logger_service.dart';
@@ -35,10 +34,10 @@ class TranslationMaskOverlay extends StatefulWidget {
   const TranslationMaskOverlay({super.key});
 
   @override
-  _TranslationMaskOverlayState createState() => _TranslationMaskOverlayState();
+  TranslationMaskOverlayState createState() => TranslationMaskOverlayState();
 }
 
-class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
+class TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
   List<TranslationMaskItem> _maskItems = [];
   final _overlayWindowsPlugin = OverlayWindowsPlugin.defaultInstance;
 
@@ -58,12 +57,13 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
           log.i('[TranslationMaskOverlay] 解析翻译项: ${itemsJson.length}个');
 
           setState(() {
-            _maskItems = itemsJson
-                .map((e) =>
-                    TranslationMaskItem.fromJson(e as Map<String, dynamic>))
-                .toList();
+            _maskItems = itemsJson.map((e) {
+              log.i('[TranslationMaskOverlay] Mapping item: $e');
+              return TranslationMaskItem.fromJson(e as Map<String, dynamic>);
+            }).toList();
           });
         } else if (type == 'close_translation_mask') {
+          log.i('[TranslationMaskOverlay] 收到关闭请求 close_translation_mask');
           setState(() {
             _maskItems = [];
           });
@@ -77,23 +77,24 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
     });
   }
 
-  /// 关闭当前overlay窗口
+  /// 关闭当前overlay窗口 - 只发送消息，不自行关闭
   void _closeOverlay() async {
-    // 获取当前overlay的ID
-    String? currentId;
-    try {
-      currentId = _overlayWindowsPlugin.messageStream
-          .listen((event) {})
-          .hashCode
-          .toString();
-    } catch (e) {
-      log.e('[TranslationMaskOverlay] 无法获取当前overlay ID: $e');
-    }
+    log.i('[TranslationMaskOverlay] 发送关闭请求到主控制器');
 
-    if (currentId != null) {
-      await _overlayWindowsPlugin.closeOverlayWindow(currentId);
-    } else {
-      log.w('[TranslationMaskOverlay] 尝试关闭overlay但无法获取ID');
+    try {
+      // 发送消息通知主应用，让HomeController来关闭窗口
+      await _overlayWindowsPlugin
+          .sendMessage("control_overlay", {'type': 'mask_closed'});
+      log.i('[TranslationMaskOverlay] 关闭请求已发送');
+
+      // 清空数据，但不关闭窗口（窗口关闭由HomeController处理）
+      setState(() {
+        _maskItems = [];
+      });
+
+      log.i('[TranslationMaskOverlay] 已清空遮罩数据，等待主控制器关闭窗口');
+    } catch (e) {
+      log.e('[TranslationMaskOverlay] 发送关闭请求失败: $e');
     }
   }
 
@@ -105,12 +106,12 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
     if (_maskItems.isEmpty) {
       _maskItems = [
         TranslationMaskItem(
-          bbox: Rect.fromLTWH(50, 50, 300, 80),
+          bbox: const Rect.fromLTWH(50, 50, 300, 80),
           translatedText: '这是测试数据1',
           originalText: 'This is test data 1',
         ),
         TranslationMaskItem(
-          bbox: Rect.fromLTWH(50, 200, 350, 100),
+          bbox: const Rect.fromLTWH(50, 200, 350, 100),
           translatedText: '这是测试数据2',
           originalText: 'This is test data 2',
         ),
@@ -127,25 +128,6 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 添加状态指示
-            Positioned(
-              top: 20,
-              left: 20,
-              child: Container(
-                padding: EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: Colors.yellow, width: 2),
-                ),
-                child: Text(
-                  '译文遮罩活跃中 [${_maskItems.length}项]',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-
             // 显示译文项
             ..._maskItems.map((item) {
               return Positioned(
@@ -167,7 +149,7 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
                         color: Colors.white,
                         fontSize: item.bbox.height * 0.7,
                         fontWeight: FontWeight.bold,
-                        shadows: [
+                        shadows: const [
                           Shadow(
                             offset: Offset(1, 1),
                             blurRadius: 3,
@@ -182,7 +164,7 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
                   ),
                 ),
               );
-            }).toList(),
+            }),
 
             // 关闭按钮
             Positioned(
@@ -195,16 +177,17 @@ class _TranslationMaskOverlayState extends State<TranslationMaskOverlay> {
                 child: InkWell(
                   onTap: () {
                     log.i('[TranslationMaskOverlay] 点击关闭按钮');
-                    _overlayWindowsPlugin
-                        .sendMessage("", {'type': 'mask_closed'});
+                    // 只发送消息通知主控制器，由主控制器来处理关闭操作
+                    _overlayWindowsPlugin.sendMessage(
+                        "control_overlay", {'type': 'mask_closed'});
                     _closeOverlay();
                   },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 12),
                     child: Text(
-                      '关闭遮罩',
-                      style: TextStyle(
+                      '关闭遮罩(${_maskItems.length}项)',
+                      style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.bold),
                     ),
                   ),
