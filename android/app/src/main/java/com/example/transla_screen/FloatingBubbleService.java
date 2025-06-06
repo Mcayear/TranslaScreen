@@ -12,6 +12,7 @@ import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
 import android.provider.Settings;
 import android.util.Log;
@@ -205,15 +206,15 @@ public class FloatingBubbleService extends Service {
         bubbleParams.y = 0;
 
         windowManager.addView(floatingView, bubbleParams);
-        floatingView.setOnTouchListener(new DraggableTouchListener(bubbleParams, this::showBubbleMenu));
 
-        floatingView.setOnLongClickListener(v -> {
-            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+        // 定义长按操作，并将其与单击操作一同传递给触摸监听器
+        Runnable onLongClickAction = () -> {
+            floatingView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
             if (channel != null) {
                 channel.invokeMethod("translate_fullscreen", null);
             }
-            return true;
-        });
+        };
+        floatingView.setOnTouchListener(new DraggableTouchListener(bubbleParams, this::showBubbleMenu, onLongClickAction));
     }
 
 
@@ -256,7 +257,7 @@ public class FloatingBubbleService extends Service {
         }
 
         // ** 关键改动：先创建拖动监听器，再把它传递给按钮创建函数 **
-        DraggableTouchListener menuDragger = new DraggableTouchListener(menuParams, null);
+        DraggableTouchListener menuDragger = new DraggableTouchListener(menuParams, null, null);
         expandedView.setOnTouchListener(menuDragger);
 
         addMenuItemsToLayout(menuLayout, menuDragger);
@@ -402,22 +403,36 @@ public class FloatingBubbleService extends Service {
     }
 
     // =====================================================================================
-    // 可重用的拖动监听器 (无改动)
+    // 可重用的拖动监听器 (集成单击和长按逻辑)
     // =====================================================================================
     private class DraggableTouchListener implements View.OnTouchListener {
         private final WindowManager.LayoutParams params;
         private final Runnable onClickAction;
+        private final Runnable onLongClickAction; // 新增：长按操作
         private int initialX;
         private int initialY;
         private float initialTouchX;
         private float initialTouchY;
         private long touchStartTime;
-        private static final long CLICK_TIME_THRESHOLD = 200;
-        private static final float DRAG_TOLERANCE = 10f;
 
-        public DraggableTouchListener(WindowManager.LayoutParams params, @Nullable Runnable onClickAction) {
+        private static final long CLICK_TIME_THRESHOLD = 200; // 单击时间阈值 (ms)
+        private static final float DRAG_TOLERANCE = 10f;       // 判定为拖动的最小移动距离
+        private static final int LONG_PRESS_TIMEOUT = 500;     // 判定为长按的超时时间 (ms)
+
+        private final Handler longPressHandler = new Handler();
+        private boolean longPressFired = false;
+        private final Runnable longPressRunnable;
+
+        public DraggableTouchListener(WindowManager.LayoutParams params, @Nullable Runnable onClickAction, @Nullable Runnable onLongClickAction) {
             this.params = params;
             this.onClickAction = onClickAction;
+            this.onLongClickAction = onLongClickAction;
+            this.longPressRunnable = () -> {
+                longPressFired = true;
+                if (this.onLongClickAction != null) {
+                    this.onLongClickAction.run();
+                }
+            };
         }
 
         @Override
@@ -429,12 +444,20 @@ public class FloatingBubbleService extends Service {
                     initialTouchX = event.getRawX();
                     initialTouchY = event.getRawY();
                     touchStartTime = System.currentTimeMillis();
+                    longPressFired = false;
+                    // 启动长按计时器
+                    longPressHandler.postDelayed(longPressRunnable, LONG_PRESS_TIMEOUT);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
                     float deltaX = event.getRawX() - initialTouchX;
                     float deltaY = event.getRawY() - initialTouchY;
+
+                    // 如果移动距离超过阈值，则视为拖动
                     if (Math.abs(deltaX) > DRAG_TOLERANCE || Math.abs(deltaY) > DRAG_TOLERANCE) {
+                        // 是拖动，取消长按计时
+                        longPressHandler.removeCallbacks(longPressRunnable);
+                        // 更新视图位置
                         if ((params.gravity & Gravity.END) == Gravity.END) {
                             params.x = initialX - (int) deltaX;
                         } else {
@@ -446,10 +469,14 @@ public class FloatingBubbleService extends Service {
                     return true;
 
                 case MotionEvent.ACTION_UP:
+                    // 手指抬起，取消长按计时
+                    longPressHandler.removeCallbacks(longPressRunnable);
+
                     long touchDuration = System.currentTimeMillis() - touchStartTime;
                     float totalDragDistance = Math.abs(event.getRawX() - initialTouchX) + Math.abs(event.getRawY() - initialTouchY);
 
-                    if (onClickAction != null && touchDuration < CLICK_TIME_THRESHOLD && totalDragDistance < DRAG_TOLERANCE) {
+                    // 如果长按未触发，且满足单击条件（时间短，位移小），则执行单击
+                    if (!longPressFired && onClickAction != null && touchDuration < CLICK_TIME_THRESHOLD && totalDragDistance < DRAG_TOLERANCE) {
                         onClickAction.run();
                     }
                     return true;

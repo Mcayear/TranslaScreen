@@ -104,7 +104,7 @@ class LoggerService {
       );
 
       logger.i(// 记录一条信息级别日志，表示服务已初始化
-          "LoggerService initialized. Logging to: ${logFilePath} and ${crashLogFilePath}");
+          "LoggerService initialized. Logging to: $logFilePath and $crashLogFilePath");
     } catch (e, s) {
       // 如果初始化失败，打印错误信息到控制台
       print('Failed to initialize LoggerService: $e\n$s');

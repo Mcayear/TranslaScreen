@@ -158,7 +158,7 @@ class HomeController {
           "OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
       translationStatus = "OpenAI 翻译服务未配置，翻译功能不可用.";
     }
-    statusMessage = ocrStatus + "\n" + translationStatus;
+    statusMessage = "$ocrStatus\n$translationStatus";
     await _checkInitialPermissions(); // This updates status message further with permission info
     isInitializing = false; // Done with this part
     _updateStatusMessageUI(); // Update UI with new status
@@ -324,7 +324,7 @@ class HomeController {
       String translatedText = translations[result.text] ?? result.text;
 
       log.i(
-          '[HomeController] 添加翻译项 #$i: 位置=${result.boundingBox}, 原文=${result.text}, 译文=${translatedText}');
+          '[HomeController] 添加翻译项 #$i: 位置=${result.boundingBox}, 原文=${result.text}, 译文=$translatedText');
 
       maskItems.add({
         'bbox': {
