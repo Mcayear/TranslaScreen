@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:transla_screen/app/services/native_bridge.dart';
 import 'package:transla_screen/app/services/ocr_service.dart';
 import 'package:transla_screen/app/services/openai_ocr_service.dart';
@@ -28,6 +29,7 @@ class HomeController {
   final NativeOverlayService _nativeOverlayService = NativeOverlayService();
 
   bool _isOverlayPermissionGranted = false; // 是否授予了悬浮窗权限
+  bool _isScreenCapturePermissionGranted = false; // 新增：是否授予了截屏权限
   bool _isControlOverlayActive = false; // 悬浮球是否激活
   String statusMessage = "正在初始化...";
   Uint8List? capturedImageBytes;
@@ -90,11 +92,7 @@ class HomeController {
     await loadAndInitializeServices(); // This also calls _checkInitialPermissions
 
     // 检查当前overlay权限状态
-    if (Platform.isAndroid || Platform.isIOS) {
-      _isOverlayPermissionGranted = true; // 使用原生实现无需特殊权限检查
-    } else {
-      _isOverlayPermissionGranted = true;
-    }
+    await _checkInitialPermissions();
 
     isInitializing = false;
     _updateStatusMessageUI(); // Update with the final status
@@ -144,26 +142,22 @@ class HomeController {
     String translationStatus = "";
     final translationConfig =
         await _settingsService.getOpenAiTranslationConfig();
-    // if (translationConfig['apiKey'] != null &&
-    //     translationConfig['apiKey']!.isNotEmpty &&
-    //     translationConfig['apiKey'] != 'YOUR_OPENAI_API_KEY') {
-    // _translationService = OpenAiTranslationService(
-    //   apiKey: translationConfig['apiKey']!,
-    //   apiEndpoint: translationConfig['apiEndpoint']!,
-    //   model: translationConfig['modelName']!,
-    // );
-    _translationService = OpenAiTranslationService(
-        apiKey: "sk-nJRSIyrMYPo2Dobfz7xwyTlSyNminiW2IVuCMB47ZyrII3Nx",
-        apiEndpoint: "https://api.zetatechs.com/v1/chat/completions",
-        model: "gemini-2.5-flash-preview-05-20-nothinking");
-    translationStatus =
-        "OpenAI 翻译服务已配置 (目标语言: ${targetLanguageController.text}).";
-    // } else {
-    //   _translationService = null;
-    //   log.w(
-    //       "OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
-    //   translationStatus = "OpenAI 翻译服务未配置，翻译功能不可用.";
-    // }
+    if (translationConfig['apiKey'] != null &&
+        translationConfig['apiKey']!.isNotEmpty &&
+        translationConfig['apiKey'] != 'YOUR_OPENAI_API_KEY') {
+      _translationService = OpenAiTranslationService(
+        apiKey: translationConfig['apiKey']!,
+        apiEndpoint: translationConfig['apiEndpoint']!,
+        model: translationConfig['modelName']!,
+      );
+      translationStatus =
+          "OpenAI 翻译服务已配置 (目标语言: ${targetLanguageController.text}).";
+    } else {
+      _translationService = null;
+      log.w(
+          "OpenAI Translation API key not configured or invalid. Translation will be unavailable.");
+      translationStatus = "OpenAI 翻译服务未配置，翻译功能不可用.";
+    }
     statusMessage = ocrStatus + "\n" + translationStatus;
     await _checkInitialPermissions(); // This updates status message further with permission info
     isInitializing = false; // Done with this part
@@ -171,17 +165,17 @@ class HomeController {
   }
 
   Future<void> _checkInitialPermissions() async {
-    await _updateOverlayStatus(); // This updates _isOverlayPermissionGranted, _isControlOverlayActive and statusMessage
+    await _updatePermissionsStatus(); // This updates _isOverlayPermissionGranted, _isControlOverlayActive and statusMessage
     capturedImageBytes = null;
     ocrResults = [];
-    // statusMessage is handled by _updateOverlayStatus
+    // statusMessage is handled by _updatePermissionsStatus
     _updateStatusMessageUI();
   }
 
-  Future<void> _updateOverlayStatus({String? baseMessage}) async {
-    _isOverlayPermissionGranted = true; // 使用原生实现不需要特殊权限检查
-
-    String permStatus = "悬浮窗权限: 已授予";
+  Future<void> _updatePermissionsStatus({String? baseMessage}) async {
+    String permStatus = "悬浮窗权限: ${_isOverlayPermissionGranted ? "已授予" : "未授予"}";
+    String capturePermStatus =
+        "截屏权限: ${_isScreenCapturePermissionGranted ? "已授予" : "未授予"}";
     String activeStatus =
         _isControlOverlayActive ? "悬浮控制球: 活动中." : "悬浮控制球: 未活动.";
 
@@ -190,16 +184,46 @@ class HomeController {
       statusParts.add(baseMessage);
     }
     statusParts.add(permStatus);
+    statusParts.add(capturePermStatus);
     statusParts.add(activeStatus);
 
     statusMessage = statusParts.join("\n");
     _updateStatusMessageUI();
   }
 
-  Future<void> requestOverlayPermission() async {
-    _updateStatusMessageUI('悬浮窗权限已授予，无需特殊请求');
-    _isOverlayPermissionGranted = true;
-    await _updateOverlayStatus(); // Refresh full status
+  Future<void> requestPermission() async {
+    if (Platform.isAndroid) {
+      // 1. 请求悬浮窗权限
+      _updateStatusMessageUI('正在请求悬浮窗权限...');
+      PermissionStatus overlayStatus =
+          await Permission.systemAlertWindow.request();
+      if (overlayStatus.isGranted) {
+        _isOverlayPermissionGranted = true;
+        _updateStatusMessageUI('悬浮窗权限已授予。');
+      } else {
+        _isOverlayPermissionGranted = false;
+        _updateStatusMessageUI('悬浮窗权限被拒绝。');
+      }
+
+      // 2. 请求截屏权限
+      if (_isOverlayPermissionGranted) {
+        _updateStatusMessageUI('请求截屏权限中...');
+        final Uint8List? captureGranted =
+            await NativeBridge.startScreenCapture();
+        if (captureGranted != null) {
+          _isScreenCapturePermissionGranted = true;
+          _updateStatusMessageUI('截屏权限已授予。');
+        } else {
+          _isScreenCapturePermissionGranted = false;
+          _updateStatusMessageUI('截屏权限被拒绝或取消。');
+        }
+      }
+    } else {
+      _updateStatusMessageUI('此平台无需特殊权限。');
+      _isOverlayPermissionGranted = true;
+      _isScreenCapturePermissionGranted = true;
+    }
+    await _updatePermissionsStatus(); // Refresh full status
   }
 
   Future<void> toggleScreenCaptureAndOcr(
@@ -345,7 +369,7 @@ class HomeController {
       _updateStatusMessageUI('显示悬浮控制球失败: $e');
     }
 
-    await _updateOverlayStatus();
+    await _updatePermissionsStatus();
   }
 
   Future<void> hideOverlay() async {
@@ -368,7 +392,7 @@ class HomeController {
       _updateStatusMessageUI('关闭悬浮窗失败: $e');
     }
 
-    await _updateOverlayStatus();
+    await _updatePermissionsStatus();
   }
 
   Future<void> setTargetLanguage(String language) async {

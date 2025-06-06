@@ -16,21 +16,17 @@ import android.os.IBinder;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.view.animation.Animation;
-import android.view.animation.AnimationUtils;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
-import androidx.core.content.ContextCompat;
 
 import io.flutter.plugin.common.MethodChannel;
 
@@ -42,29 +38,33 @@ public class FloatingBubbleService extends Service {
     private static final String CHANNEL_ID = "FloatingBubbleChannel";
     private static final int NOTIFICATION_ID = 1001;
     private static final int BUBBLE_SIZE_DP = 56; // 悬浮球大小，以dp为单位
-    
+
     private WindowManager windowManager;
     private View floatingView;
     private View expandedView;
+    private WindowManager.LayoutParams bubbleParams; // 保存悬浮球的布局参数
+    private WindowManager.LayoutParams menuParams;   // 保存菜单的布局参数
     private boolean isExpanded = false;
     private static MethodChannel channel;
-    
+
     // 设置Flutter MethodChannel以便通信
     public static void setMethodChannel(MethodChannel methodChannel) {
         channel = methodChannel;
     }
-    
+
     @Override
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "悬浮球服务创建");
+        // 获取WindowManager服务
+        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         // 创建通知通道（Android 8.0及以上需要）
         createNotificationChannel();
-        
+
         // 启动前台服务
         startForeground(NOTIFICATION_ID, createNotification());
     }
-    
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         // 首先检查权限
@@ -79,7 +79,7 @@ public class FloatingBubbleService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        
+
         if (floatingView == null) {
             try {
                 createFloatingBubble();
@@ -95,7 +95,7 @@ public class FloatingBubbleService extends Service {
         }
         return START_STICKY;
     }
-    
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -108,41 +108,40 @@ public class FloatingBubbleService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "悬浮翻译服务",
-                NotificationManager.IMPORTANCE_LOW
+                    CHANNEL_ID,
+                    "悬浮翻译服务",
+                    NotificationManager.IMPORTANCE_LOW
             );
             channel.setDescription("用于保持悬浮球服务运行");
             channel.enableLights(false);
             channel.enableVibration(false);
-            
+
             NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
             }
         }
     }
-    
+
     /**
      * 创建前台服务所需的通知
      */
     private Notification createNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_IMMUTABLE
         );
-        
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_edit)
-            .setContentTitle("TranslaScreen翻译服务")
-            .setContentText("悬浮球服务正在运行中")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setContentIntent(pendingIntent);
-            
-        return builder.build();
+
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setContentTitle("TranslaScreen翻译服务")
+                .setContentText("悬浮球服务正在运行中")
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
+                .build();
     }
 
     /**
@@ -154,17 +153,7 @@ public class FloatingBubbleService extends Service {
         }
         return true; // 旧版本Android默认允许
     }
-    
-    /**
-     * 打开系统设置请求悬浮窗权限
-     * 此方法需要在Activity中调用，这里只是提供参考
-     */
-    public static Intent getOverlayPermissionIntent(Context context) {
-        Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:" + context.getPackageName()));
-        return intent;
-    }
-    
+
     /**
      * 将dp值转换为像素值
      */
@@ -173,426 +162,356 @@ public class FloatingBubbleService extends Service {
         return Math.round(dp * density);
     }
 
+    private int getWindowLayoutType() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+    }
+
     private void createFloatingBubble() {
-        // 获取WindowManager服务
-        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-        
-        // 创建悬浮球视图容器
         floatingView = new FrameLayout(this);
         int bubbleSizePx = dpToPx(BUBBLE_SIZE_DP);
-        
-        // 创建圆形背景
+
         GradientDrawable circleDrawable = new GradientDrawable();
         circleDrawable.setShape(GradientDrawable.OVAL);
         circleDrawable.setColor(Color.parseColor("#AA9C27B0")); // 半透明紫色
-        
-        // 创建圆形容器
+
         FrameLayout circleContainer = new FrameLayout(this);
         circleContainer.setBackground(circleDrawable);
-        FrameLayout.LayoutParams circleParams = new FrameLayout.LayoutParams(
-                bubbleSizePx,
-                bubbleSizePx
-        );
-        
-        // 添加翻译图标
+        FrameLayout.LayoutParams circleParams = new FrameLayout.LayoutParams(bubbleSizePx, bubbleSizePx);
+
         ImageView iconView = new ImageView(this);
         iconView.setImageResource(android.R.drawable.ic_menu_edit);
         iconView.setColorFilter(Color.WHITE);
-        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
-                dpToPx(24),
-                dpToPx(24),
-                Gravity.CENTER
-        );
-        
+        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.CENTER);
+
         circleContainer.addView(iconView, iconParams);
         ((FrameLayout) floatingView).addView(circleContainer, circleParams);
-        
-        // 设置悬浮球阴影效果
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             floatingView.setElevation(dpToPx(4));
         }
-        
-        // 设置WindowManager参数
-        final WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams(
+
+        bubbleParams = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 getWindowLayoutType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
         );
-        
-        // 初始位置 - 右边中间位置
-        layoutParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
-        layoutParams.x = dpToPx(8);
-        layoutParams.y = 0;
-        
-        try {
-            // 添加到窗口管理器
-            windowManager.addView(floatingView, layoutParams);
-            
-            // 设置触摸监听
-            setupTouchListener(layoutParams);
-        } catch (Exception e) {
-            Log.e(TAG, "添加悬浮窗失败", e);
-            throw e; // 重新抛出异常，让上层处理
-        }
-    }
-    
-    private int getWindowLayoutType() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            return WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        } else {
-            return WindowManager.LayoutParams.TYPE_PHONE;
-        }
-    }
-    
-    private void setupTouchListener(final WindowManager.LayoutParams params) {
-        floatingView.setOnTouchListener(new View.OnTouchListener() {
-            private int initialX;
-            private int initialY;
-            private float initialTouchX;
-            private float initialTouchY;
-            private long touchStartTime;
-            private static final long CLICK_TIME_THRESHOLD = 200;
-            private static final float DRAG_TOLERANCE = 10f; // 拖动阈值，防止轻微触碰被识别为拖动
-            
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        // 记录初始位置
-                        initialX = params.x;
-                        initialY = params.y;
-                        initialTouchX = event.getRawX();
-                        initialTouchY = event.getRawY();
-                        touchStartTime = System.currentTimeMillis();
-                        return true;
-                        
-                    case MotionEvent.ACTION_MOVE:
-                        // 计算移动距离
-                        float deltaX = event.getRawX() - initialTouchX;
-                        float deltaY = event.getRawY() - initialTouchY;
-                        
-                        // 确认是否为拖动意图(排除轻微触碰)
-                        if (Math.abs(deltaX) > DRAG_TOLERANCE || Math.abs(deltaY) > DRAG_TOLERANCE) {
-                            // 修正拖动方向计算
-                            // 注意：params.x在END对齐时，方向是相反的
-                            if ((params.gravity & Gravity.END) != 0) {
-                                // 对于END对齐，x增大时悬浮球应该向左移动（x值减小）
-                                params.x = initialX - (int) deltaX;
-                            } else {
-                                // 对于START或其他对齐，保持正常方向
-                                params.x = initialX + (int) deltaX;
-                            }
-                            // Y方向保持不变
-                            params.y = initialY + (int) deltaY;
-                            
-                            // 更新悬浮球位置
-                            windowManager.updateViewLayout(floatingView, params);
-                            
-                            // 如果菜单展开，需要重新隐藏并显示在新位置
-                            if (isExpanded && expandedView != null) {
-                                // 当拖动时隐藏菜单
-                                if (expandedView.getVisibility() == View.VISIBLE) {
-                                    expandedView.setVisibility(View.GONE);
-                                }
-                            }
-                        }
-                        return true;
-                        
-                    case MotionEvent.ACTION_UP:
-                        // 如果是点击(不是拖动)
-                        long touchDuration = System.currentTimeMillis() - touchStartTime;
-                        float totalDragDistance = Math.abs(event.getRawX() - initialTouchX) + 
-                                                Math.abs(event.getRawY() - initialTouchY);
-                        
-                        Log.d(TAG, "触摸结束: 时长=" + touchDuration + "ms, 距离=" + totalDragDistance + ", isExpanded=" + isExpanded);
-                                                
-                        if (touchDuration < CLICK_TIME_THRESHOLD && totalDragDistance < DRAG_TOLERANCE) {
-                            Log.d(TAG, "检测到点击行为");
-                            if (!isExpanded || (expandedView != null && expandedView.getVisibility() != View.VISIBLE)) {
-                                Log.d(TAG, "展开菜单");
-                                showBubbleMenu();
-                            } else {
-                                Log.d(TAG, "隐藏菜单");
-                                hideBubbleMenu();
-                            }
-                        } else if (isExpanded && expandedView != null && expandedView.getVisibility() != View.VISIBLE) {
-                            // 如果是拖动结束且菜单是展开状态但不可见，重新显示菜单在新位置
-                            windowManager.removeView(expandedView);
-                            expandedView = null;
-                            isExpanded = false;
-                            showBubbleMenu();
-                        }
-                        return true;
-                }
-                return false;
+
+        bubbleParams.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        bubbleParams.x = dpToPx(8);
+        bubbleParams.y = 0;
+
+        windowManager.addView(floatingView, bubbleParams);
+        floatingView.setOnTouchListener(new DraggableTouchListener(bubbleParams, this::showBubbleMenu));
+
+        floatingView.setOnLongClickListener(v -> {
+            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            if (channel != null) {
+                channel.invokeMethod("translate_fullscreen", null);
             }
-        });
-        
-        // 长按监听 - 直接全屏翻译
-        floatingView.setOnLongClickListener(new View.OnLongClickListener() {
-            @Override
-            public boolean onLongClick(View v) {
-                // 添加震动反馈
-                v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-                
-                // 执行全屏翻译
-                if (channel != null) {
-                    channel.invokeMethod("translate_fullscreen", null);
-                }
-                return true;
-            }
+            return true;
         });
     }
-    
+
+
     private void showBubbleMenu() {
+        if (isExpanded || expandedView != null) {
+            return;
+        }
         isExpanded = true;
-        Log.d(TAG, "显示菜单，当前状态: " + isExpanded);
-        
-        // 创建环形菜单
-        if (expandedView == null) {
-            Log.d(TAG, "创建新菜单...");
-            
-            // 创建菜单容器 - 使用固定大小确保可见
-            expandedView = new FrameLayout(this);
-            
-            // 创建菜单项
-            addMenuItems();
-            
-            // 设置WindowManager参数 - 使用固定大小确保全部显示
-            WindowManager.LayoutParams menuParams = new WindowManager.LayoutParams(
-                    dpToPx(200),  // 固定宽度
-                    dpToPx(200),  // 固定高度
+        Log.d(TAG, "展开菜单");
+        floatingView.setVisibility(View.GONE);
+
+        LinearLayout menuLayout = new LinearLayout(this);
+        menuLayout.setOrientation(LinearLayout.VERTICAL);
+        int padding = dpToPx(8);
+        menuLayout.setPadding(padding, padding, padding, padding);
+        menuLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        GradientDrawable background = new GradientDrawable();
+        background.setShape(GradientDrawable.RECTANGLE);
+        background.setColor(Color.parseColor("#E6D3E8FD"));
+        background.setCornerRadius(dpToPx(28));
+        menuLayout.setBackground(background);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            menuLayout.setElevation(dpToPx(4));
+        }
+
+        expandedView = menuLayout;
+
+        if (menuParams == null) {
+            menuParams = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
                     getWindowLayoutType(),
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                     PixelFormat.TRANSLUCENT
             );
-            
-            // 菜单位置 - 使用与悬浮球相同的对齐方式
-            WindowManager.LayoutParams bubbleParams = (WindowManager.LayoutParams) floatingView.getLayoutParams();
-            menuParams.gravity = Gravity.TOP | Gravity.START; // 使用绝对定位
-            
-            // 获取悬浮球在屏幕上的位置
-            int[] location = new int[2];
-            floatingView.getLocationOnScreen(location);
-            
-            // 菜单位置居中于悬浮球
-            menuParams.x = location[0] - (dpToPx(200) / 2) + (dpToPx(BUBBLE_SIZE_DP) / 2);
-            menuParams.y = location[1] - (dpToPx(200) / 2) + (dpToPx(BUBBLE_SIZE_DP) / 2);
-            
-            Log.d(TAG, "菜单位置: x=" + menuParams.x + ", y=" + menuParams.y);
-            
-            try {
-                // 添加到窗口管理器
-                windowManager.addView(expandedView, menuParams);
-                
-                // 执行显示动画
-                for (int i = 0; i < ((FrameLayout) expandedView).getChildCount(); i++) {
-                    View item = ((FrameLayout) expandedView).getChildAt(i);
-                    item.setAlpha(0f);
-                    item.setScaleX(0.5f);
-                    item.setScaleY(0.5f);
-                    item.animate()
-                        .alpha(1f)
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .setDuration(200)
-                        .setStartDelay(i * 50)
-                        .start();
-                }
-                
-                Log.d(TAG, "菜单创建完成，子项数量: " + ((FrameLayout) expandedView).getChildCount());
-            } catch (Exception e) {
-                Log.e(TAG, "添加菜单窗口失败", e);
-                isExpanded = false;
-                expandedView = null;
-                // 通知Flutter端发生错误
-                if (channel != null) {
-                    channel.invokeMethod("overlay_menu_error", e.getMessage());
-                }
-            }
-        } else {
-            Log.d(TAG, "菜单已存在，设置为可见");
-            expandedView.setVisibility(View.VISIBLE);
-            // 执行显示动画
-            for (int i = 0; i < ((FrameLayout) expandedView).getChildCount(); i++) {
-                View item = ((FrameLayout) expandedView).getChildAt(i);
-                item.setAlpha(0f);
-                item.setScaleX(0.5f);
-                item.setScaleY(0.5f);
-                item.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(200)
-                    .setStartDelay(i * 50)
-                    .start();
-            }
+            menuParams.gravity = bubbleParams.gravity;
+            menuParams.x = bubbleParams.x;
+            menuParams.y = bubbleParams.y;
+        }
+
+        // ** 关键改动：先创建拖动监听器，再把它传递给按钮创建函数 **
+        DraggableTouchListener menuDragger = new DraggableTouchListener(menuParams, null);
+        expandedView.setOnTouchListener(menuDragger);
+
+        addMenuItemsToLayout(menuLayout, menuDragger);
+
+        windowManager.addView(expandedView, menuParams);
+
+        expandedView.setAlpha(0f);
+        expandedView.animate().alpha(1f).setDuration(200).start();
+    }
+
+    private void hideBubbleMenu() {
+        if (!isExpanded || expandedView == null) {
+            return;
+        }
+        Log.d(TAG, "隐藏菜单");
+
+        isExpanded = false;
+        final View viewToRemove = expandedView;
+        expandedView = null;
+
+        viewToRemove.animate()
+                .alpha(0f)
+                .setDuration(200)
+                .withEndAction(() -> {
+                    if (viewToRemove.isAttachedToWindow()) {
+                        windowManager.removeView(viewToRemove);
+                    }
+                })
+                .start();
+
+        if (floatingView != null) {
+            floatingView.setVisibility(View.VISIBLE);
+            floatingView.setAlpha(0f);
+            floatingView.animate().alpha(1f).setDuration(200).start();
         }
     }
-    
-    private void addMenuItems() {
-        // 增加日志
-        Log.d(TAG, "添加菜单项...");
-        
-        // 添加全屏翻译菜单项 - 固定在悬浮球的下方
-        addMenuItem(
-            android.R.drawable.ic_menu_camera,
-            "全屏翻译",
-            "translate_fullscreen",
-            0,       // 水平居中
-            dpToPx(60), // 下方
-            Color.parseColor("#4CAF50") // 绿色
-        );
-        
-        // 添加选区翻译菜单项 - 固定在左侧
-        addMenuItem(
-            android.R.drawable.ic_menu_crop,
-            "选区翻译",
-            "start_area_selection",
-            -dpToPx(60), // 左侧
-            0,          // 同一水平线
-            Color.parseColor("#2196F3") // 蓝色
-        );
+
+    /**
+     * 创建并添加所有菜单项到布局中
+     * @param menuLayout 菜单的父布局
+     * @param menuDragger 父布局的拖动监听器，用于传递给可拖动的子按钮
+     */
+    private void addMenuItemsToLayout(LinearLayout menuLayout, View.OnTouchListener menuDragger) {
+        // 1. 折叠/翻译按钮 (A文) - 将父容器的拖动监听器传给它
+        menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_sort_by_size, "collapse", true, menuDragger, menuLayout));
+
+        // 其他按钮不需要拖动功能，所以传 null
+        menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_camera, "translate_fullscreen", false, null, null));
+        menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_crop, "start_area_selection", false, null, null));
+        // menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_search, "ocr_text", false, null, null));
+        // menuLayout.addView(createMenuButton(android.R.drawable.ic_lock_lock, "lock_position", false, null, null));
+        // menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_edit, "input_text", false, null, null));
+        // menuLayout.addView(createMenuButton(android.R.drawable.ic_menu_more, "more_options", false, null, null));
     }
-    
-    private void addMenuItem(int iconRes, String text, final String action, int xOffset, int yOffset, int color) {
-        // 创建圆形菜单项
-        FrameLayout menuItem = new FrameLayout(this);
-        
-        // 设置圆形背景
-        GradientDrawable itemBg = new GradientDrawable();
-        itemBg.setShape(GradientDrawable.OVAL);
-        itemBg.setColor(color);
-        menuItem.setBackground(itemBg);
-        
-        // 添加图标
-        ImageView icon = new ImageView(this);
-        icon.setImageResource(iconRes);
-        icon.setColorFilter(Color.WHITE);
-        
-        // 图标居中
-        FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
-                dpToPx(24), dpToPx(24), Gravity.CENTER);
-        menuItem.addView(icon, iconParams);
-        
-        // 设置菜单项大小和位置
-        FrameLayout.LayoutParams itemParams = new FrameLayout.LayoutParams(
-                dpToPx(48), dpToPx(48));
-        
-        // 相对于菜单中心的位置（布局中心即悬浮球位置）
-        itemParams.gravity = Gravity.CENTER;
-        itemParams.leftMargin = xOffset;
-        itemParams.topMargin = yOffset;
-        
-        // 添加文本标签
-        TextView label = new TextView(this);
-        label.setText(text);
-        label.setTextColor(Color.WHITE);
-        label.setPadding(dpToPx(8), dpToPx(4), dpToPx(8), dpToPx(4));
-        label.setBackgroundColor(Color.parseColor("#80000000"));
-        
-        // 文本标签位置
-        FrameLayout.LayoutParams labelParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT);
-        labelParams.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
-        labelParams.bottomMargin = -dpToPx(24);
-        
-        menuItem.addView(label, labelParams);
-        
-        // 点击监听
-        menuItem.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                // 添加点击效果
+
+    /**
+     * 创建单个菜单按钮 (ImageView)
+     * @param dragListener 如果此按钮需要能拖动整个菜单，则传入父容器的拖动监听器
+     * @param parentView   父容器的视图实例，仅当 dragListener 不为 null 时需要
+     */
+    private ImageView createMenuButton(int iconResId, final String action, boolean isCollapseButton, @Nullable View.OnTouchListener dragListener, @Nullable View parentView) {
+        ImageView button = new ImageView(this);
+        button.setImageResource(iconResId);
+        int padding = dpToPx(12);
+        button.setPadding(padding, padding, padding, padding);
+
+        if (isCollapseButton) {
+            // 折叠按钮样式
+            GradientDrawable circleBg = new GradientDrawable();
+            circleBg.setShape(GradientDrawable.OVAL);
+            circleBg.setColor(Color.parseColor("#2196F3"));
+            button.setBackground(circleBg);
+            button.setColorFilter(Color.WHITE);
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dpToPx(48), dpToPx(48));
+            params.setMargins(0, 0, 0, dpToPx(12));
+            button.setLayoutParams(params);
+        } else {
+            // 普通按钮样式
+            button.setBackgroundColor(Color.TRANSPARENT);
+            button.setColorFilter(Color.parseColor("#555555"));
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dpToPx(48), dpToPx(48));
+            params.setMargins(0, dpToPx(4), 0, dpToPx(4));
+            button.setLayoutParams(params);
+        }
+
+        // ** 关键改动：根据按钮类型设置不同的监听器 **
+        if (isCollapseButton && dragListener != null && parentView != null) {
+            // 这个按钮既要能点击，也要能拖动整个菜单
+            button.setOnTouchListener(new DraggableButtonTouchListener(v -> hideBubbleMenu(), dragListener, parentView));
+        } else {
+            // 其他按钮只有点击功能
+            button.setOnClickListener(v -> {
                 v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
-                
-                // 调用对应功能
+                handleButtonClick(action);
+            });
+        }
+        return button;
+    }
+
+    private void handleButtonClick(String action) {
+        switch (action) {
+            case "collapse":
+                // 此处不再处理，由DraggableButtonTouchListener处理
+                break;
+            case "start_area_selection":
+            case "translate_fullscreen":
                 if (channel != null) {
                     channel.invokeMethod(action, null);
                 }
-                
-                // 隐藏菜单
                 hideBubbleMenu();
-            }
-        });
-        
-        // 添加到菜单容器
-        ((FrameLayout) expandedView).addView(menuItem, itemParams);
-    }
-    
-    private void hideBubbleMenu() {
-        Log.d(TAG, "隐藏菜单，当前状态: " + isExpanded);
-        if (expandedView != null) {
-            isExpanded = false; // 先设置状态为非展开
-            
-            // 执行隐藏动画
-            final int childCount = ((FrameLayout) expandedView).getChildCount();
-            Log.d(TAG, "准备隐藏 " + childCount + " 个菜单项");
-            
-            if (childCount == 0) {
-                // 如果没有子视图，直接隐藏
-                expandedView.setVisibility(View.GONE);
-                Log.d(TAG, "菜单无子项，直接隐藏");
-                return;
-            }
-            
-            for (int i = 0; i < childCount; i++) {
-                final View item = ((FrameLayout) expandedView).getChildAt(i);
-                final int index = i;
-                
-                item.animate()
-                    .alpha(0f)
-                    .scaleX(0.5f)
-                    .scaleY(0.5f)
-                    .setDuration(150)
-                    .setStartDelay(index * 30)
-                    .withEndAction(new Runnable() {
-                        @Override
-                        public void run() {
-                            Log.d(TAG, "菜单项 " + index + " 动画完成");
-                            if (index == childCount - 1) {
-                                // 最后一个动画完成后隐藏整个菜单
-                                expandedView.setVisibility(View.GONE);
-                                Log.d(TAG, "所有菜单项动画完成，菜单已隐藏");
-                            }
-                        }
-                    })
-                    .start();
-            }
-        } else {
-            Log.d(TAG, "菜单不存在，无需隐藏");
+                break;
+            default:
+                Toast.makeText(FloatingBubbleService.this, "功能待实现: " + action, Toast.LENGTH_SHORT).show();
+                hideBubbleMenu();
+                break;
         }
     }
-    
+
+
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (floatingView != null && windowManager != null) {
+        if (floatingView != null && floatingView.isAttachedToWindow()) {
             try {
                 windowManager.removeView(floatingView);
             } catch (Exception e) {
                 Log.e(TAG, "移除悬浮窗时出错", e);
             }
-            floatingView = null;
         }
-        
-        if (expandedView != null && windowManager != null) {
+        floatingView = null;
+
+        if (expandedView != null && expandedView.isAttachedToWindow()) {
             try {
                 windowManager.removeView(expandedView);
             } catch (Exception e) {
                 Log.e(TAG, "移除菜单窗口时出错", e);
             }
-            expandedView = null;
+        }
+        expandedView = null;
+        stopForeground(true);
+    }
+
+    // =====================================================================================
+    // 可重用的拖动监听器 (无改动)
+    // =====================================================================================
+    private class DraggableTouchListener implements View.OnTouchListener {
+        private final WindowManager.LayoutParams params;
+        private final Runnable onClickAction;
+        private int initialX;
+        private int initialY;
+        private float initialTouchX;
+        private float initialTouchY;
+        private long touchStartTime;
+        private static final long CLICK_TIME_THRESHOLD = 200;
+        private static final float DRAG_TOLERANCE = 10f;
+
+        public DraggableTouchListener(WindowManager.LayoutParams params, @Nullable Runnable onClickAction) {
+            this.params = params;
+            this.onClickAction = onClickAction;
         }
 
-        // 停止前台服务
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE);
-        } else {
-            stopForeground(true);
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    initialX = params.x;
+                    initialY = params.y;
+                    initialTouchX = event.getRawX();
+                    initialTouchY = event.getRawY();
+                    touchStartTime = System.currentTimeMillis();
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    float deltaX = event.getRawX() - initialTouchX;
+                    float deltaY = event.getRawY() - initialTouchY;
+                    if (Math.abs(deltaX) > DRAG_TOLERANCE || Math.abs(deltaY) > DRAG_TOLERANCE) {
+                        if ((params.gravity & Gravity.END) == Gravity.END) {
+                            params.x = initialX - (int) deltaX;
+                        } else {
+                            params.x = initialX + (int) deltaX;
+                        }
+                        params.y = initialY + (int) deltaY;
+                        windowManager.updateViewLayout(v, params);
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                    long touchDuration = System.currentTimeMillis() - touchStartTime;
+                    float totalDragDistance = Math.abs(event.getRawX() - initialTouchX) + Math.abs(event.getRawY() - initialTouchY);
+
+                    if (onClickAction != null && touchDuration < CLICK_TIME_THRESHOLD && totalDragDistance < DRAG_TOLERANCE) {
+                        onClickAction.run();
+                    }
+                    return true;
+            }
+            return false;
         }
     }
-} 
+
+    // =====================================================================================
+    // ** 新增：一个特殊的TouchListener，用于既能点击又能拖动父视图的按钮 **
+    // =====================================================================================
+    private static class DraggableButtonTouchListener implements View.OnTouchListener {
+        private final View.OnClickListener clickListener;
+        private final View.OnTouchListener dragListener;
+        private final View parentView;
+
+        private float initialTouchX;
+        private float initialTouchY;
+        private long touchStartTime;
+        private static final long CLICK_TIME_THRESHOLD = 200;
+        private static final float DRAG_TOLERANCE = 10f;
+
+
+        public DraggableButtonTouchListener(@NonNull View.OnClickListener clickListener,
+                                            @NonNull View.OnTouchListener dragListener,
+                                            @NonNull View parentView) {
+            this.clickListener = clickListener;
+            this.dragListener = dragListener;
+            this.parentView = parentView;
+        }
+
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    initialTouchX = event.getRawX();
+                    initialTouchY = event.getRawY();
+                    touchStartTime = System.currentTimeMillis();
+                    // 将事件传递给父视图的拖动监听器以初始化拖动
+                    dragListener.onTouch(parentView, event);
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    // 持续将事件传递给父视图的拖动监听器以处理拖动
+                    dragListener.onTouch(parentView, event);
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                    long touchDuration = System.currentTimeMillis() - touchStartTime;
+                    float totalDragDistance = Math.abs(event.getRawX() - initialTouchX) + Math.abs(event.getRawY() - initialTouchY);
+
+                    // 判断是点击还是拖动结束
+                    if (touchDuration < CLICK_TIME_THRESHOLD && totalDragDistance < DRAG_TOLERANCE) {
+                        // 这是个点击事件
+                        v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                        clickListener.onClick(v);
+                    }
+                    // 无论如何，都将UP事件传递给父视图的拖动监听器以完成拖动操作
+                    dragListener.onTouch(parentView, event);
+                    return true;
+            }
+            return false;
+        }
+    }
+}

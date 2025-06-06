@@ -103,8 +103,8 @@ class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                     ),
                   const SizedBox(height: 20),
                   ElevatedButton(
-                    onPressed: _controller.requestOverlayPermission,
-                    child: const Text('检查/请求悬浮窗权限 (插件)'),
+                    onPressed: _controller.requestPermission,
+                    child: const Text('检查/请求所有权限'),
                   ),
                   const SizedBox(height: 10),
                   ElevatedButton(
@@ -148,7 +148,7 @@ class MyHomePageState extends State<MyHomePage> with WidgetsBindingObserver {
                   const SizedBox(height: 20),
                   const Text(
                     '使用说明:\n'
-                    '1. 点击"检查/请求悬浮窗权限 (插件)".\n'
+                    '1. 点击"检查/请求所有权限".\n'
                     '2. 点击"显示悬浮窗"激活翻译悬浮球 (可拖动)。\n'
                     '3. 单击悬浮球展开功能菜单：\n'
                     '   - 绿色图标: 全屏翻译\n'
