@@ -5,8 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
@@ -64,15 +66,23 @@ public class FloatingBubbleService extends Service {
     private WindowManager windowManager;
     private View floatingView; // 悬浮球视图
     private View expandedView; // 展开后的菜单视图
+    private FrameLayout circleContainer; // 悬浮球的圆形背景容器，方便后续修改颜色
+    private ImageView iconView; // 悬浮球的图标，方便后续修改图标
 
     // 布局参数，用于控制视图在屏幕上的位置、大小等属性
     private WindowManager.LayoutParams bubbleParams;
     private WindowManager.LayoutParams menuParams;
 
     private boolean isExpanded = false; // 标记菜单是否处于展开状态
+    private boolean isOverlayActive = false; // 标记译文遮罩是否处于激活状态
 
     // 用于与 Flutter 端通信的 MethodChannel
     private static MethodChannel channel;
+
+    // 用于接收遮罩状态变化广播
+    private BroadcastReceiver overlayStateReceiver;
+    // 用于保存原始的长按操作
+    private Runnable onLongClickAction;
 
     // =====================================================================================
     // 静态方法 - Flutter 通信接口
@@ -98,6 +108,7 @@ public class FloatingBubbleService extends Service {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, createNotification());
+        setupOverlayStateReceiver();
     }
 
     @Override
@@ -127,6 +138,10 @@ public class FloatingBubbleService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        // 注销广播接收器，防止内存泄漏
+        if (overlayStateReceiver != null) {
+            unregisterReceiver(overlayStateReceiver);
+        }
         // 确保移除所有窗口视图，防止窗口泄漏
         removeView(floatingView);
         floatingView = null;
@@ -159,12 +174,12 @@ public class FloatingBubbleService extends Service {
         circleDrawable.setShape(GradientDrawable.OVAL);
         circleDrawable.setColor(Color.parseColor("#AA9C27B0")); // 半透明紫色
 
-        FrameLayout circleContainer = new FrameLayout(this);
+        circleContainer = new FrameLayout(this); // 赋值给成员变量
         circleContainer.setBackground(circleDrawable);
         FrameLayout.LayoutParams circleParams = new FrameLayout.LayoutParams(bubbleSizePx, bubbleSizePx);
 
         // 2. 创建图标
-        ImageView iconView = new ImageView(this);
+        iconView = new ImageView(this); // 赋值给成员变量
         iconView.setImageResource(android.R.drawable.ic_menu_edit);
         iconView.setColorFilter(Color.WHITE);
         FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dpToPx(24), dpToPx(24), Gravity.CENTER);
@@ -176,6 +191,9 @@ public class FloatingBubbleService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             floatingView.setElevation(dpToPx(4));
         }
+
+        // 强制使用软件渲染，以避免在某些模拟器上因图形驱动问题导致的日志刷屏
+        floatingView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
         // 4. 设置窗口布局参数
         bubbleParams = new WindowManager.LayoutParams(
@@ -190,7 +208,7 @@ public class FloatingBubbleService extends Service {
         bubbleParams.y = 0;
 
         // 5. 定义长按操作，并将其与单击展开菜单的操作一同传递给触摸监听器
-        Runnable onLongClickAction = () -> {
+        onLongClickAction = () -> {
             floatingView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
             if (channel != null) {
                 channel.invokeMethod("translate_fullscreen", null);
@@ -229,6 +247,9 @@ public class FloatingBubbleService extends Service {
             menuLayout.setElevation(dpToPx(4));
         }
         expandedView = menuLayout;
+
+        // 强制使用软件渲染，以规避模拟器上的图形问题
+        expandedView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
         // 3. 初始化或复用菜单的布局参数
         if (menuParams == null) {
@@ -314,6 +335,99 @@ public class FloatingBubbleService extends Service {
             floatingView.setAlpha(0f);
             floatingView.animate().alpha(1f).setDuration(200).start();
         }
+    }
+
+
+    // =====================================================================================
+    // 译文遮罩集成逻辑 (Overlay Integration Logic)
+    // =====================================================================================
+
+    /**
+     * 设置一个广播接收器，用于监听译文遮罩服务的状态变化。
+     */
+    private void setupOverlayStateReceiver() {
+        overlayStateReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null || intent.getAction() == null) return;
+
+                String action = intent.getAction();
+                // 使用在 TranslationOverlayService 中定义的公开常量
+                String overlayShownAction = "com.example.transla_screen.ACTION_OVERLAY_SHOWN";
+                String overlayHiddenAction = "com.example.transla_screen.ACTION_OVERLAY_HIDDEN";
+
+                if (overlayShownAction.equals(action)) {
+                    isOverlayActive = true;
+                    updateBubbleState();
+                    bringBubbleToFront();
+                } else if (overlayHiddenAction.equals(action)) {
+                    isOverlayActive = false;
+                    updateBubbleState();
+                }
+            }
+        };
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction("com.example.transla_screen.ACTION_OVERLAY_SHOWN");
+        filter.addAction("com.example.transla_screen.ACTION_OVERLAY_HIDDEN");
+        registerReceiver(overlayStateReceiver, filter);
+    }
+
+    /**
+     * 根据译文遮罩的激活状态，更新悬浮球的外观和行为。
+     */
+    private void updateBubbleState() {
+        if (floatingView == null || circleContainer == null || iconView == null) return;
+
+        GradientDrawable background = (GradientDrawable) circleContainer.getBackground();
+
+        if (isOverlayActive) {
+            // 如果菜单当前是展开的，先将其收起，以确保悬浮球可见
+            if (isExpanded) {
+                // hideBubbleMenu() 会将 floatingView 设置为 VISIBLE
+                hideBubbleMenu();
+            }
+            
+            // 切换到 "关闭遮罩" 状态
+            background.setColor(Color.parseColor("#D32F2F")); // 红色
+            iconView.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            // 单击关闭遮罩，拖动功能保留，禁用长按
+            floatingView.setOnTouchListener(new DraggableTouchListener(bubbleParams, this::closeTranslationOverlay, null));
+        } else {
+            // 恢复到普通状态
+            background.setColor(Color.parseColor("#AA9C27B0")); // 半透明紫色
+            iconView.setImageResource(android.R.drawable.ic_menu_edit);
+            // 恢复单击展开菜单、长按全局翻译的功能
+            floatingView.setOnTouchListener(new DraggableTouchListener(bubbleParams, this::showBubbleMenu, onLongClickAction));
+        }
+    }
+
+    /**
+     * 将悬浮球视图带到最顶层。
+     * 通过先从WindowManager移除，再重新添加的方式实现，这样可以使其显示在其他同类型窗口之上。
+     */
+    private void bringBubbleToFront() {
+        if (floatingView != null && floatingView.isAttachedToWindow()) {
+            Log.d(TAG, "Bringing bubble to front of the overlay.");
+            windowManager.removeView(floatingView);
+            windowManager.addView(floatingView, bubbleParams);
+        }
+    }
+
+    /**
+     * 处理关闭译文遮罩的点击事件。
+     * 它通过停止 TranslationOverlayService 来实现关闭。
+     */
+    private void closeTranslationOverlay() {
+        if (floatingView != null) {
+            floatingView.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+        }
+        Log.d(TAG, "Requesting to close translation overlay.");
+        Intent intent = new Intent(this, TranslationOverlayService.class);
+        stopService(intent);
+        // `stopService` 是异步的。
+        // `TranslationOverlayService` 的 `onDestroy` 会发送广播。
+        // 广播接收后，`updateBubbleState` 会被调用以恢复悬浮球状态，无需在此处手动更新。
     }
 
 

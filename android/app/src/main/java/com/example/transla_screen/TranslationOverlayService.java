@@ -17,16 +17,13 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
-import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -44,6 +41,9 @@ public class TranslationOverlayService extends Service {
     private static final String TAG = "TranslationOverlay";
     private static final String CHANNEL_ID = "TranslationOverlayChannel";
     private static final int NOTIFICATION_ID = 1002;
+    // 定义广播动作 (Broadcast Actions)
+    public static final String ACTION_OVERLAY_SHOWN = "com.example.transla_screen.ACTION_OVERLAY_SHOWN";
+    public static final String ACTION_OVERLAY_HIDDEN = "com.example.transla_screen.ACTION_OVERLAY_HIDDEN";
     
     private WindowManager windowManager;
     private View overlayView;
@@ -111,6 +111,8 @@ public class TranslationOverlayService extends Service {
         if (overlayView == null) {
             try {
                 createOverlayView();
+                // 通知悬浮球服务，遮罩已显示
+                sendBroadcast(new Intent(ACTION_OVERLAY_SHOWN));
             } catch (Exception e) {
                 Log.e(TAG, "创建译文蒙版失败: " + e.getMessage(), e);
                 if (channel != null) {
@@ -237,33 +239,6 @@ public class TranslationOverlayService extends Service {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
         
-        // 创建关闭按钮
-        Button closeButton = new Button(this);
-        closeButton.setText("关闭遮罩(" + maskItems.size() + "项)");
-        closeButton.setBackgroundColor(0xFFFF0000); // 红色
-        closeButton.setTextColor(0xFFFFFFFF); // 白色文字
-        closeButton.setPadding(30, 20, 30, 20);
-        
-        // 设置关闭按钮布局参数
-        FrameLayout.LayoutParams buttonParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        buttonParams.gravity = Gravity.BOTTOM | Gravity.END;
-        buttonParams.bottomMargin = 100; // 增加底部边距，避免被导航栏遮挡
-        buttonParams.rightMargin = 50;
-        
-        // 添加关闭按钮
-        ((FrameLayout) overlayView).addView(closeButton, buttonParams);
-        
-        // 设置关闭按钮点击事件
-        closeButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                closeOverlay();
-            }
-        });
-        
         // 设置WindowManager参数
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -377,6 +352,8 @@ public class TranslationOverlayService extends Service {
     
     @Override
     public void onDestroy() {
+        // 通知悬浮球服务，遮罩已关闭
+        sendBroadcast(new Intent(ACTION_OVERLAY_HIDDEN));
         super.onDestroy();
         if (overlayView != null && windowManager != null) {
             try {
