@@ -675,4 +675,3 @@ public class FloatingBubbleService extends Service {
         }
     }
 }
-}

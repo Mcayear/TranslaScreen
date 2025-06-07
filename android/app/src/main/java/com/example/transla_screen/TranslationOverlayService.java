@@ -315,29 +315,25 @@ public class TranslationOverlayService extends Service {
                 FrameLayout maskItemView = new FrameLayout(this);
                 // 降低背景透明度，从70%改为40%透明度
                 maskItemView.setBackgroundColor(0x66000000); // 40%透明度黑色
-                
-                // 移除边框，避免文本被边框遮挡
-                // maskItemView.setForeground(ContextCompat.getDrawable(this, android.R.drawable.dialog_holo_dark_frame));
-                
                 // 创建译文文本
                 TextView textView = new TextView(this);
                 textView.setText(item.translatedText);
                 textView.setTextColor(0xFFFFFFFF); // 白色
                 // 调整文本大小，使其更易读
                 textView.setTextSize(Math.max(14, item.bbox.height() * 0.2f));
-                textView.setGravity(Gravity.CENTER);
+                textView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
                 // 添加文本阴影，提高可读性
                 textView.setShadowLayer(3.0f, 1.0f, 1.0f, 0xFF000000);
-                
-                // 添加小边距，确保文本不贴边。边距会导致文本偏移
-                // textView.setPadding(8, 4, 8, 4);
-                
+                // 禁用字体边距，以更好地控制垂直对齐
+                textView.setIncludeFontPadding(false);
                 // 添加文本到视图
-                maskItemView.addView(textView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        Gravity.CENTER
-                ));
+                FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                );
+                // 将译文整体上移 4 个像素
+                textParams.topMargin = -4;
+                maskItemView.addView(textView, textParams);
                 
                 // 设置位置和大小
                 FrameLayout.LayoutParams itemParams = new FrameLayout.LayoutParams(
