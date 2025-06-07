@@ -112,7 +112,10 @@ public class TranslationOverlayService extends Service {
             try {
                 createOverlayView();
                 // 通知悬浮球服务，遮罩已显示
-                sendBroadcast(new Intent(ACTION_OVERLAY_SHOWN));
+                // 将广播限定在应用内，以提高安全性和可靠性
+                Intent shownIntent = new Intent(ACTION_OVERLAY_SHOWN);
+                shownIntent.setPackage(getPackageName());
+                sendBroadcast(shownIntent);
             } catch (Exception e) {
                 Log.e(TAG, "创建译文蒙版失败: " + e.getMessage(), e);
                 if (channel != null) {
@@ -353,7 +356,10 @@ public class TranslationOverlayService extends Service {
     @Override
     public void onDestroy() {
         // 通知悬浮球服务，遮罩已关闭
-        sendBroadcast(new Intent(ACTION_OVERLAY_HIDDEN));
+        // 将广播限定在应用内
+        Intent hiddenIntent = new Intent(ACTION_OVERLAY_HIDDEN);
+        hiddenIntent.setPackage(getPackageName());
+        sendBroadcast(hiddenIntent);
         super.onDestroy();
         if (overlayView != null && windowManager != null) {
             try {
