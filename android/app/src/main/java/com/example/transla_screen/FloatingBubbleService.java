@@ -370,7 +370,13 @@ public class FloatingBubbleService extends Service {
         IntentFilter filter = new IntentFilter();
         filter.addAction("com.example.transla_screen.ACTION_OVERLAY_SHOWN");
         filter.addAction("com.example.transla_screen.ACTION_OVERLAY_HIDDEN");
-        registerReceiver(overlayStateReceiver, filter);
+        
+        // 对于 Android 13 (API 33) 及以上版本，必须指定接收器的导出行为。将其标记为 NOT_EXPORTED。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(overlayStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(overlayStateReceiver, filter);
+        }
     }
 
     /**
