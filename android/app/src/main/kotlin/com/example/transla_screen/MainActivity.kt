@@ -3,6 +3,7 @@ package com.example.transla_screen
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -17,6 +18,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.Surface
 import android.view.WindowManager
 import androidx.annotation.NonNull
 import io.flutter.embedding.android.FlutterActivity
@@ -35,6 +37,11 @@ class MainActivity : FlutterActivity() {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+
+    // 用于跟踪屏幕尺寸以应对旋转
+    private var screenWidth: Int = 0
+    private var screenHeight: Int = 0
+    private var screenDensity: Int = 0
 
     @Volatile private var latestFrameBytes: ByteArray? = null
     private var isCaptureSessionActive = false
@@ -154,13 +161,11 @@ class MainActivity : FlutterActivity() {
                 val finalResultCode = resultCode
                 val finalData = data
 
-                // The 300ms delay was in your original code. It might be a workaround for some race condition
-                // with service startup or MediaProjection availability. Test reducing or removing it.
-                mainHandler.postDelayed({
-                    if (this@MainActivity.flutterResultForScreenCapture != currentPendingResult) {
+                // 延迟是为了确保服务启动和MediaProjection准备就绪
+                mainHandler.post {
+                     if (this@MainActivity.flutterResultForScreenCapture != currentPendingResult) {
                         Log.w(TAG, "onActivityResult: flutterResultForScreenCapture changed or nulled during delay. Aborting projection setup.")
-                        // ScreenCaptureService.stopService(this@MainActivity) // Stop if started for this request
-                        return@postDelayed
+                        return@post
                     }
                     try {
                         mediaProjection = this@MainActivity.mediaProjectionManager?.getMediaProjection(finalResultCode, finalData)
@@ -170,7 +175,7 @@ class MainActivity : FlutterActivity() {
                             this@MainActivity.flutterResultForScreenCapture = null
                             result?.error("PROJECTION_ERROR", "Failed to get MediaProjection post-service-start.", null)
                             cleanUpScreenCaptureResources(true)
-                            return@postDelayed
+                            return@post
                         }
                         Log.d(TAG, "MediaProjection obtained successfully after service start.")
                         mediaProjection?.registerCallback(mediaProjectionCallback, mainHandler) // Use mainHandler for its callbacks
@@ -188,7 +193,7 @@ class MainActivity : FlutterActivity() {
                         result?.error("EXCEPTION_POST_SERVICE", "Exception: ${e.message}", null)
                         cleanUpScreenCaptureResources(true)
                     }
-                }, 300)
+                }
             } else {
                 Log.w(TAG, "Screen capture permission denied by user or cancelled. Result code: $resultCode")
                 val result = this.flutterResultForScreenCapture
@@ -223,9 +228,19 @@ class MainActivity : FlutterActivity() {
             windowManager.defaultDisplay.getRealMetrics(displayMetrics)
         }
 
-        val screenWidth = displayMetrics.widthPixels
-        val screenHeight = displayMetrics.heightPixels
-        val screenDensity = displayMetrics.densityDpi
+        val newScreenWidth = displayMetrics.widthPixels
+        val newScreenHeight = displayMetrics.heightPixels
+        val newScreenDensity = displayMetrics.densityDpi
+
+        // 检查屏幕尺寸是否变化，避免不必要的重新创建
+        if (newScreenWidth == screenWidth && newScreenHeight == screenHeight && imageReader != null) {
+             Log.d(TAG, "Screen dimensions have not changed. Skipping reconfiguration.")
+             return
+        }
+        
+        screenWidth = newScreenWidth
+        screenHeight = newScreenHeight
+        screenDensity = newScreenDensity
 
         imageReader?.close() // Close existing reader if any
         imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2 /*maxImages*/)
@@ -407,5 +422,18 @@ class MainActivity : FlutterActivity() {
         Log.d(TAG, "onDestroy called.")
         cleanUpScreenCaptureResources(true) // Ensure everything is stopped and service is requested to stop
         super.onDestroy()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        Log.d(TAG, "onConfigurationChanged: New orientation: ${newConfig.orientation}")
+        // 当屏幕旋转时，重新设置捕捉
+        if (isCaptureSessionActive) {
+            Log.d(TAG, "Re-setting up capture due to configuration change.")
+            // 使用 Handler 延迟执行，以确保窗口尺寸已更新
+            mainHandler.post {
+                setupContinuousCapture()
+            }
+        }
     }
 }
